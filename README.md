@@ -71,15 +71,8 @@ You may not reuse, distribute, or modify this software without explicit permissi
 
 For inquiries, beta testing, or early access to a premium version:
 
-- 📧 **timeless4k@gmail.com**
+- 📧 **guru12.it@gmail.com**
 - 🐙 **github.com/Timeless4k**
-- 🧠 **More soon at timelessdev.io** *(Coming soon!)*
-
-## ⭐ Coming Soon
-
-* GUI installer or web wrapper
-* One-click Docker version
-* Pro modules for AI, remote syncing, and SaaS integration
-* Launch on Product Hunt + Gumroad
+- 🧠 **More soon some** 
 
 Made with love & terminal magic 🧪 by **Timeless4k**
