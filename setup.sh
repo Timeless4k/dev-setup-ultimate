@@ -1,3 +1,2370 @@
+# ========================================================================
+#  MASTER SETUP SCRIPT - Complete Development Environment for CS/AI/Web
+#  Author: Guru
+#  Created: April 9, 2025
+#  Updated: April 9, 2025 - Fixed various issues and improved error handling
+# ========================================================================
+
+# Set strict error handling
+set -e
+
+# ======= Configuration (Edit these variables) =======
+DEFAULT_USERNAME="Timeless4k"
+DEFAULT_EMAIL="guru12.it@gmail.com"
+DEFAULT_GITHUB_USERNAME="Timeless4k"
+
+# Paths
+HOME_DIR="$HOME"
+SCRIPTS_DIR="$HOME_DIR/scripts"
+CONFIG_DIR="$SCRIPTS_DIR/config"
+PROJECTS_DIR="$HOME_DIR/Projects"
+DEFAULT_BACKUP_DIR="/mnt/g/My Drive/Backups"
+
+# Project folders to create
+PROJECTS=("vynlox-ai" "vynlox-marketing" "vynlox-docs" "web-projects" "experiments" "notebooks")
+
+# Web browser settings
+DEFAULT_BROWSER="brave"  # Options: brave, chrome, firefox
+DEFAULT_SEARCH="google"  # Options: google, duckduckgo, brave
+
+# Backup settings
+BACKUP_RETENTION_DAYS=30
+BACKUP_ENCRYPT=true
+
+# ======= Script Setup =======
+SCRIPT_NAME=$(basename "$0")
+LOG_FILE="$SCRIPTS_DIR/logs/setup_$(date +%Y-%m-%d_%H-%M-%S).log"
+
+# Detect platform - WSL, Linux, or macOS
+detect_platform() {
+    if grep -q Microsoft /proc/version 2>/dev/null; then
+        echo "wsl"
+    elif [[ "$(uname)" == "Darwin" ]]; then
+        echo "macos"
+    else
+        echo "linux"
+    fi
+}
+
+PLATFORM=$(detect_platform)
+
+# Create necessary directories
+mkdir -p "$SCRIPTS_DIR/logs"
+mkdir -p "$CONFIG_DIR"
+touch "$LOG_FILE"
+
+# ======= Helper Functions =======
+log() {
+    local message="$1"
+    local level="${2:-INFO}"
+    echo -e "[$(date +"%Y-%m-%d %H:%M:%S")] [$level] $message" | tee -a "$LOG_FILE"
+}
+
+success() {
+    log "$1" "SUCCESS"
+    echo -e "\e[32m✅ $1\e[0m"
+}
+
+info() {
+    log "$1" "INFO"
+    echo -e "\e[34mℹ️ $1\e[0m"
+}
+
+warning() {
+    log "$1" "WARNING"
+    echo -e "\e[33m⚠️ $1\e[0m"
+}
+
+error() {
+    log "$1" "ERROR"
+    echo -e "\e[31m❌ $1\e[0m"
+}
+
+check_success() {
+    if [ $? -eq 0 ]; then
+        success "$1"
+        return 0
+    else
+        error "$1 failed"
+        return 1
+    fi
+}
+
+install_if_missing() {
+    if ! command -v $1 &> /dev/null; then
+        info "Installing $1..."
+        sudo apt install -y $1
+        if ! check_success "$1 installation"; then
+            warning "Failed to install $1. You may need to install it manually."
+            return 1
+        fi
+        return 0
+    else
+        info "$1 already installed"
+        return 0
+    fi
+}
+
+# Retry a command up to a specific number of times until it succeeds
+retry() {
+    local retries=$1
+    shift
+    local count=0
+    until "$@"; do
+        exit=$?
+        count=$((count + 1))
+        if [ $count -lt $retries ]; then
+            warning "Command failed. Attempt $count/$retries. Retrying in 5 seconds..."
+            sleep 5
+        else
+            error "The command has failed after $retries attempts."
+            return $exit
+        fi
+    done
+    return 0
+}
+
+# Function to convert Windows path to WSL path
+convert_windows_to_wsl_path() {
+    local win_path="$1"
+    
+    # Replace backslashes with forward slashes
+    win_path="${win_path//\\//}"
+    
+    # Extract drive letter and convert to lowercase
+    local drive_letter="${win_path:0:1}"
+    drive_letter=$(echo "$drive_letter" | tr '[:upper:]' '[:lower:]')
+    
+    # Remove the drive letter and colon
+    local path_without_drive="${win_path:2}"
+    
+    # Construct WSL path
+    echo "/mnt/$drive_letter$path_without_drive"
+}
+
+# Get Google Drive path in WSL format
+get_google_drive_path() {
+    local default_path="G:\\My Drive\\Backups"
+    
+    if [ "$PLATFORM" == "wsl" ]; then
+        read -p "Enter your Google Drive path in Windows format (e.g., G:\\My Drive\\Backups): " win_path
+        win_path=${win_path:-$default_path}
+        
+        # Convert Windows path to WSL path
+        local wsl_path=$(convert_windows_to_wsl_path "$win_path")
+        echo "$wsl_path"
+    else
+        # For Linux/macOS, ask for direct path
+        read -p "Enter your backup path: " backup_path
+        echo "${backup_path:-$HOME/Backups}"
+    fi
+}
+
+# Function to check for network availability
+check_network() {
+    if ping -c 1 google.com &> /dev/null; then
+        return 0
+    else
+        error "Network connectivity issue. Please check your internet connection."
+        return 1
+    fi
+}
+
+# ======= Main Menu Function =======
+show_menu() {
+    clear
+    echo -e "\e[1;36m========================================\e[0m"
+    echo -e "\e[1;36m    🚀 DEVELOPMENT ENVIRONMENT SETUP    \e[0m"
+    echo -e "\e[1;36m========================================\e[0m"
+    echo -e "\e[1;33m1. 💻 Full Development Environment Setup\e[0m"
+    echo -e "\e[1;33m2. 🌐 Browser & Privacy Optimizer\e[0m"
+    echo -e "\e[1;33m3. 🧠 Create AI Modeling Workspace\e[0m"
+    echo -e "\e[1;33m4. 🪄 Clean Slate Windows Configuration\e[0m"
+    echo -e "\e[1;33m5. 🗂️ Setup Downloads Organizer\e[0m"
+    echo -e "\e[1;33m6. 🧱 Setup Dotfiles Syncer\e[0m"
+    echo -e "\e[1;33m7. 📦 Create System Backup\e[0m"
+    echo -e "\e[1;33m8. 📋 Setup Academic Project Tracker\e[0m"
+    echo -e "\e[1;33m9. ⚙️ Configure All Tools\e[0m"
+    echo -e "\e[1;33m0. ❌ Exit\e[0m"
+    echo -e "\e[1;36m========================================\e[0m"
+    echo -ne "\e[1;32mEnter your choice [0-9]: \e[0m"
+    read choice
+
+    case $choice in
+        1) 
+            if setup_dev_environment; then
+                success "Development environment setup completed"
+            else
+                error "Development environment setup had errors"
+            fi
+            ;;
+        2) setup_browser_privacy ;;
+        3) create_ai_workspace ;;
+        4) 
+            if [ "$PLATFORM" != "wsl" ]; then
+                warning "Clean Slate Configuration is designed for Windows with WSL. Your platform is $PLATFORM."
+                read -p "Do you still want to continue? (y/n): " continue_anyway
+                if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+                    show_menu
+                    return
+                fi
+            fi
+            clean_slate_config 
+            ;;
+        5) setup_downloads_organizer ;;
+        6) setup_dotfiles_syncer ;;
+        7) create_system_backup ;;
+        8) setup_academic_tracker ;;
+        9) configure_all_tools ;;
+        0) exit 0 ;;
+        *) warning "Invalid option. Please try again."; show_menu ;;
+    esac
+}
+
+# ======= 1. Development Environment Setup =======
+setup_dev_environment() {
+    info "Starting development environment setup..."
+    
+    # Create scripts directory structure
+    mkdir -p "$SCRIPTS_DIR"/{backup,productivity,academic,utils,config,logs}
+    
+    # Check for network connectivity
+    if ! check_network; then
+        error "Network connectivity is required for development environment setup."
+        return 1
+    fi
+    
+    # Update and upgrade
+    info "Updating system packages..."
+    if ! sudo apt update; then
+        error "Failed to update package lists. Check your network connection and try again."
+        return 1
+    fi
+    
+    # Only continue with upgrade if update succeeded
+    if ! sudo apt upgrade -y; then
+        warning "Package upgrade had issues. Continuing with installation but some packages might not be the latest version."
+    else
+        success "System update completed"
+    fi
+    
+    # Install essential tools
+    info "Installing essential tools..."
+    ESSENTIALS="build-essential curl wget git zsh tmux unzip zip \
+        software-properties-common gcc g++ make cmake libssl-dev libffi-dev \
+        python3-dev python3-pip python3-venv fonts-powerline gnupg ca-certificates \
+        lsb-release htop neofetch tree ripgrep fd-find jq fzf bat"
+    
+    if ! sudo apt install -y $ESSENTIALS; then
+        error "Failed to install essential tools."
+        warning "Continuing with setup, but you may need to install failed packages manually."
+    else
+        success "Essential tools installation completed"
+    fi
+    
+    # Git configuration
+    info "Setting up Git global config..."
+    # Prompt for Git config if not already configured
+    if ! git config --global user.name >/dev/null 2>&1; then
+        read -p "Enter your name for Git configuration [$DEFAULT_USERNAME]: " git_username
+        git_username=${git_username:-$DEFAULT_USERNAME}
+        git config --global user.name "$git_username"
+    fi
+    
+    if ! git config --global user.email >/dev/null 2>&1; then
+        read -p "Enter your email for Git configuration [$DEFAULT_EMAIL]: " git_email
+        git_email=${git_email:-$DEFAULT_EMAIL}
+        git config --global user.email "$git_email"
+    fi
+    
+    git config --global core.editor "code --wait"
+    git config --global core.autocrlf input
+    git config --global pull.rebase false
+    git config --global init.defaultBranch main
+    success "Git configuration completed"
+    
+    # Install Oh My Zsh
+    if [ ! -d "$HOME_DIR/.oh-my-zsh" ]; then
+        info "Installing Oh My Zsh..."
+        if ! retry 3 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended; then
+            error "Failed to install Oh My Zsh"
+            warning "Continuing setup, but shell customizations may be incomplete"
+        else
+            success "Oh My Zsh installation completed"
+        fi
+    else
+        info "Oh My Zsh already installed"
+    fi
+    
+    # Zsh plugins
+    info "Installing Zsh plugins..."
+    ZSH_CUSTOM="$HOME_DIR/.oh-my-zsh/custom"
+    
+    # Create plugins directory if it doesn't exist
+    mkdir -p "$ZSH_CUSTOM/plugins"
+    
+    # Function to clone or update a plugin
+    install_zsh_plugin() {
+        local repo="$1"
+        local dest="$2"
+        
+        if [ ! -d "$dest" ]; then
+            info "Installing plugin from $repo..."
+            retry 3 git clone --depth=1 "https://github.com/$repo" "$dest"
+            if [ $? -ne 0 ]; then
+                warning "Failed to clone $repo. Skipping."
+                return 1
+            fi
+        else
+            info "Updating plugin at $dest..."
+            (cd "$dest" && git pull)
+        fi
+        return 0
+    }
+    
+    install_zsh_plugin "zsh-users/zsh-autosuggestions" "${ZSH_CUSTOM}/plugins/zsh-autosuggestions"
+    install_zsh_plugin "zsh-users/zsh-syntax-highlighting" "${ZSH_CUSTOM}/plugins/zsh-syntax-highlighting"
+    install_zsh_plugin "zsh-users/zsh-completions" "${ZSH_CUSTOM}/plugins/zsh-completions"
+    install_zsh_plugin "romkatv/powerlevel10k" "${ZSH_CUSTOM}/themes/powerlevel10k"
+    
+    # Update .zshrc with plugins and theme
+    if [ -f "$HOME_DIR/.zshrc" ]; then
+        # Backup existing .zshrc
+        cp "$HOME_DIR/.zshrc" "$HOME_DIR/.zshrc.backup.$(date +%Y%m%d%H%M%S)"
+        
+        # Update theme if default is set
+        if grep -q 'ZSH_THEME="robbyrussell"' "$HOME_DIR/.zshrc"; then
+            sed -i 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME_DIR/.zshrc"
+        fi
+        
+        # Update plugins if default is set
+        if grep -q 'plugins=(git)' "$HOME_DIR/.zshrc"; then
+            sed -i 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-completions docker docker-compose python pip npm node nvm)/' "$HOME_DIR/.zshrc"
+        fi
+        
+        # Add source to bash_aliases if not already present
+        if ! grep -q 'source ~/.bash_aliases' "$HOME_DIR/.zshrc"; then
+            echo 'source ~/.bash_aliases' >> "$HOME_DIR/.zshrc"
+        fi
+        
+        success "Zsh configuration updated"
+    else
+        warning ".zshrc not found, skipping Zsh configuration"
+    fi
+    
+    # Change default shell to Zsh if it's available
+    if command -v zsh &> /dev/null; then
+        if [ "$SHELL" != "$(which zsh)" ]; then
+            info "Changing default shell to Zsh..."
+            chsh -s $(which zsh)
+            if [ $? -ne 0 ]; then
+                warning "Failed to change default shell. You can do this manually with: chsh -s $(which zsh)"
+            else
+                success "Default shell changed to Zsh"
+            fi
+        else
+            info "Zsh is already the default shell"
+        fi
+    else
+        warning "Zsh is not installed. Skipping shell change."
+    fi
+    
+    # Node.js (via NVM)
+    info "Installing Node.js LTS with NVM..."
+    if [ ! -d "$HOME_DIR/.nvm" ]; then
+        retry 3 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+        if [ $? -ne 0 ]; then
+            error "Failed to install NVM"
+            warning "Continuing setup, but Node.js functionality will be limited"
+        else
+            export NVM_DIR="$HOME_DIR/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            
+            # Check if nvm command is available
+            if command -v nvm &> /dev/null; then
+                retry 3 nvm install --lts
+                if [ $? -ne 0 ]; then
+                    warning "Failed to install Node.js LTS"
+                else
+                    nvm use --lts
+                    success "NVM and Node.js LTS installed and configured"
+                fi
+            else
+                warning "NVM installation succeeded but command not found. You may need to restart your terminal."
+            fi
+        fi
+    else
+        info "NVM already installed, updating..."
+        export NVM_DIR="$HOME_DIR/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        
+        if command -v nvm &> /dev/null; then
+            retry 3 nvm install --lts
+            if [ $? -ne 0 ]; then
+                warning "Failed to update Node.js LTS"
+            else
+                nvm use --lts
+                success "Node.js updated to latest LTS version"
+            fi
+        else
+            warning "NVM installation exists but command not found. Try restarting your terminal."
+        fi
+    fi
+    
+    # Global NPM packages - only if Node.js was successfully installed
+    if command -v node &> /dev/null && command -v npm &> /dev/null; then
+        info "Installing global NPM packages..."
+        
+        NPM_PACKAGES=(
+            "pnpm"
+            "vercel"
+            "supabase"
+            "create-t3-app"
+            "eslint"
+            "prettier"
+            "typescript"
+            "ts-node"
+            "@nestjs/cli" 
+            "next"
+            "create-react-app"
+            "netlify-cli"
+            "npm-check-updates"
+        )
+        
+        for package in "${NPM_PACKAGES[@]}"; do
+            info "Installing $package..."
+            retry 3 npm install -g $package
+            if [ $? -ne 0 ]; then
+                warning "Failed to install $package"
+            fi
+        done
+        
+        success "Global NPM packages installation completed"
+    else
+        warning "Node.js or npm not found, skipping global NPM packages installation"
+    fi
+    
+    # Python setup
+    info "Setting up Python environment..."
+    if command -v pip &> /dev/null || command -v pip3 &> /dev/null; then
+        # Determine which pip command to use
+        PIP_CMD="pip"
+        if ! command -v pip &> /dev/null && command -v pip3 &> /dev/null; then
+            PIP_CMD="pip3"
+        fi
+        
+        retry 3 $PIP_CMD install --user --upgrade pip
+        if [ $? -ne 0 ]; then
+            warning "Failed to upgrade pip"
+        fi
+        
+        # Basic Python tools
+        PYTHON_BASIC=(
+            "virtualenv"
+            "pipenv"
+            "poetry"
+        )
+        
+        for package in "${PYTHON_BASIC[@]}"; do
+            info "Installing $package..."
+            retry 3 $PIP_CMD install --user $package
+            if [ $? -ne 0 ]; then
+                warning "Failed to install $package"
+            fi
+        done
+        
+        # Python data science & ML packages
+        info "Installing Python data science & ML packages..."
+        
+        # Core data science
+        PYTHON_DATA=(
+            "numpy"
+            "pandas"
+            "scikit-learn"
+            "matplotlib"
+            "seaborn"
+            "plotly"
+            "jupyterlab"
+            "notebook"
+            "ipywidgets"
+        )
+        
+        for package in "${PYTHON_DATA[@]}"; do
+            info "Installing $package..."
+            retry 3 $PIP_CMD install --user $package
+            if [ $? -ne 0 ]; then
+                warning "Failed to install $package"
+            fi
+        done
+        
+        # ML frameworks - these can be large/complex so we'll handle errors more gracefully
+        info "Installing machine learning frameworks..."
+        retry 3 $PIP_CMD install --user tensorflow keras
+        if [ $? -ne 0 ]; then
+            warning "Failed to install TensorFlow. You may need to install it manually with specific options for your system."
+        fi
+        
+        retry 3 $PIP_CMD install --user torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        if [ $? -ne 0 ]; then
+            warning "Failed to install PyTorch. You may need to install it manually with specific options for your system."
+            warning "Try: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
+        fi
+        
+        # ML tools
+        PYTHON_ML_TOOLS=(
+            "xgboost"
+            "lightgbm"
+            "catboost"
+            "transformers"
+            "datasets"
+            "accelerate"
+            "huggingface_hub"
+            "fastapi"
+            "uvicorn"
+            "pydantic"
+        )
+        
+        for package in "${PYTHON_ML_TOOLS[@]}"; do
+            info "Installing $package..."
+            retry 3 $PIP_CMD install --user $package
+            if [ $? -ne 0 ]; then
+                warning "Failed to install $package"
+            fi
+        done
+        
+        # IDE tools
+        PYTHON_IDE=(
+            "jupyterlab-vim"
+            "jupyterlab-lsp"
+            "python-lsp-server[all]"
+            "black"
+            "flake8"
+            "mypy"
+            "pytest"
+        )
+        
+        for package in "${PYTHON_IDE[@]}"; do
+            info "Installing $package..."
+            retry 3 $PIP_CMD install --user "$package"
+            if [ $? -ne 0 ]; then
+                warning "Failed to install $package"
+            fi
+        done
+        
+        success "Python packages installation completed"
+    else
+        error "Python pip not found. Skipping Python packages installation."
+    fi
+    
+    # Databases
+    info "Installing database tools..."
+    if command -v apt &> /dev/null; then
+        DB_PACKAGES=(
+            "postgresql"
+            "postgresql-contrib"
+            "sqlite3"
+            "redis-server"
+        )
+        
+        for package in "${DB_PACKAGES[@]}"; do
+            info "Installing $package..."
+            if ! sudo apt install -y $package; then
+                warning "Failed to install $package"
+            fi
+        done
+        
+        # Start and enable PostgreSQL if installed
+        if command -v pg_ctl &> /dev/null || command -v postgres &> /dev/null; then
+            if command -v systemctl &> /dev/null; then
+                sudo systemctl enable postgresql
+                sudo systemctl start postgresql
+                success "PostgreSQL enabled and started"
+            else
+                warning "systemctl not found. You may need to start PostgreSQL manually."
+            fi
+        fi
+        
+        # MongoDB - with careful error handling
+        info "Installing MongoDB..."
+        if ! command -v mongod &> /dev/null; then
+            # Only attempt installation if not already installed
+            if command -v wget &> /dev/null; then
+                retry 3 wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
+                
+                if [ $? -eq 0 ]; then
+                    # Get distribution codename
+                    if command -v lsb_release &> /dev/null; then
+                        DISTRO=$(lsb_release -cs)
+                        echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu $DISTRO/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+                        
+                        sudo apt update
+                        if ! sudo apt install -y mongodb-org; then
+                            warning "Failed to install MongoDB"
+                        else
+                            if command -v systemctl &> /dev/null; then
+                                sudo systemctl enable mongod
+                                sudo systemctl start mongod
+                                success "MongoDB installed, enabled, and started"
+                            else
+                                warning "systemctl not found. MongoDB installed but not started."
+                            fi
+                        fi
+                    else
+                        warning "lsb_release not found. Skipping MongoDB installation."
+                    fi
+                else
+                    warning "Failed to add MongoDB repository key. Skipping MongoDB installation."
+                fi
+            else
+                warning "wget not found. Skipping MongoDB installation."
+            fi
+        else
+            info "MongoDB already installed"
+            
+            # Ensure MongoDB is running
+            if command -v systemctl &> /dev/null; then
+                if ! systemctl is-active --quiet mongod; then
+                    sudo systemctl start mongod
+                    success "MongoDB started"
+                fi
+                
+                if ! systemctl is-enabled --quiet mongod; then
+                    sudo systemctl enable mongod
+                    success "MongoDB enabled to start on boot"
+                fi
+            fi
+        fi
+    else
+        warning "apt not found. Skipping database installations."
+    fi
+    
+    # Docker & Docker Compose
+    info "Installing Docker & Docker Compose..."
+    if ! command -v docker &> /dev/null; then
+        if command -v curl &> /dev/null; then
+            retry 3 curl -fsSL https://get.docker.com -o get-docker.sh
+            
+            if [ -f get-docker.sh ]; then
+                if ! sudo sh get-docker.sh; then
+                    error "Docker installation script failed"
+                else
+                    sudo usermod -aG docker $USER
+                    if command -v systemctl &> /dev/null; then
+                        sudo systemctl enable docker
+                        sudo systemctl start docker
+                        success "Docker installed, enabled, and started"
+                    else
+                        warning "systemctl not found. Docker installed but not started."
+                    fi
+                fi
+                
+                # Clean up
+                rm -f get-docker.sh
+            else
+                error "Failed to download Docker installation script"
+            fi
+        else
+            warning "curl not found. Skipping Docker installation."
+        fi
+    else
+        info "Docker already installed"
+    fi
+    
+    # Kubernetes tools
+    info "Installing Kubernetes tools..."
+    if ! command -v kubectl &> /dev/null; then
+        if command -v curl &> /dev/null; then
+            # Get latest stable kubectl version
+            retry 3 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            
+            if [ -f kubectl ]; then
+                sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+                rm -f kubectl
+                success "kubectl installed"
+            else
+                warning "Failed to download kubectl"
+            fi
+        else
+            warning "curl not found. Skipping kubectl installation."
+        fi
+    else
+        info "kubectl already installed"
+    fi
+    
+    if ! command -v minikube &> /dev/null; then
+        if command -v curl &> /dev/null; then
+            # Install minikube
+            retry 3 curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+            
+            if [ -f minikube-linux-amd64 ]; then
+                sudo install minikube-linux-amd64 /usr/local/bin/minikube
+                rm -f minikube-linux-amd64
+                success "minikube installed"
+            else
+                warning "Failed to download minikube"
+            fi
+        else
+            warning "curl not found. Skipping minikube installation."
+        fi
+    else
+        info "minikube already installed"
+    fi
+    
+    # Cloud CLIs
+    info "Installing Cloud CLI tools..."
+    
+    # AWS CLI
+    if ! command -v aws &> /dev/null; then
+        if command -v curl &> /dev/null && command -v unzip &> /dev/null; then
+            info "Installing AWS CLI..."
+            retry 3 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            
+            if [ -f awscliv2.zip ]; then
+                unzip -q awscliv2.zip
+                if [ -d aws ]; then
+                    sudo ./aws/install
+                    rm -rf aws awscliv2.zip
+                    success "AWS CLI installed"
+                else
+                    warning "AWS CLI extraction failed"
+                    rm -f awscliv2.zip
+                fi
+            else
+                warning "Failed to download AWS CLI"
+            fi
+        else
+            warning "curl or unzip not found. Skipping AWS CLI installation."
+        fi
+    else
+        info "AWS CLI already installed"
+    fi
+    
+    # Azure CLI
+    if ! command -v az &> /dev/null; then
+        if command -v curl &> /dev/null; then
+            info "Installing Azure CLI..."
+            
+            # This is a complex installation, so we'll capture the output and only show errors
+            if ! curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash; then
+                error "Azure CLI installation failed"
+            else
+                success "Azure CLI installed"
+            fi
+        else
+            warning "curl not found. Skipping Azure CLI installation."
+        fi
+    else
+        info "Azure CLI already installed"
+    fi
+    
+    # Google Cloud SDK
+    if ! command -v gcloud &> /dev/null; then
+        if command -v apt-key &> /dev/null && command -v apt-get &> /dev/null; then
+            info "Installing Google Cloud SDK..."
+            
+            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+            curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+            
+            if sudo apt-get update && sudo apt-get install -y google-cloud-sdk; then
+                success "Google Cloud SDK installed"
+            else
+                error "Google Cloud SDK installation failed"
+            fi
+        else
+            warning "apt-key or apt-get not found. Skipping Google Cloud SDK installation."
+        fi
+    else
+        info "Google Cloud SDK already installed"
+    fi
+    
+    # VS Code extensions - only if VS Code is installed
+    if command -v code &> /dev/null; then
+        info "Installing VS Code extensions..."
+        EXTENSIONS=(
+            "ms-python.python"
+            "ms-toolsai.jupyter"
+            "ms-toolsai.vscode-jupyter-slideshow"
+            "esbenp.prettier-vscode"
+            "dbaeumer.vscode-eslint"
+            "bradlc.vscode-tailwindcss"
+            "eamodio.gitlens"
+            "visualstudioexptteam.vscodeintellicode"
+            "ms-vsliveshare.vsliveshare"
+            "ms-azuretools.vscode-docker"
+            "ms-vscode-remote.remote-wsl"
+            "github.vscode-pull-request-github"
+            "ms-vscode-remote.remote-containers"
+            "redhat.vscode-yaml"
+            "yzhang.markdown-all-in-one"
+            "streetsidesoftware.code-spell-checker"
+            "davidanson.vscode-markdownlint"
+            "mongodb.mongodb-vscode"
+            "mtxr.sqltools"
+                    return 1
+    fi
+    
+    # Get task details
+    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
+    IFS=, read -r name due_date description status <<< "$task_line"
+    
+    # Calculate days until due
+    local days=$(days_until_due "$due_date")
+    
+    # Display task details
+    echo -e "${COLOR_BLUE}=== Task Details ===${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}Name:${COLOR_RESET}        $name"
+    echo -e "${COLOR_CYAN}Due Date:${COLOR_RESET}    $(format_date "$due_date")"
+    echo -e "${COLOR_CYAN}Description:${COLOR_RESET} $description"
+    echo -e "${COLOR_CYAN}Status:${COLOR_RESET}      $([ "$status" = "Completed" ] && echo -e "${COLOR_GREEN}Completed${COLOR_RESET}" || echo -e "${COLOR_YELLOW}Pending${COLOR_RESET}")"
+    
+    # Check if task folder exists
+    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+    if [ -d "$task_dir" ]; then
+        echo -e "${COLOR_CYAN}Folder:${COLOR_RESET}      $task_dir"
+        
+        # Check for files in the task folder
+        file_count=$(find "$task_dir" -type f | wc -l)
+        if [ $file_count -gt 1 ]; then  # More than just README.md
+            echo -e "${COLOR_CYAN}Files:${COLOR_RESET}       $(($file_count - 1)) files in folder (excluding README)"
+            echo ""
+            echo -e "${COLOR_BLUE}Files in task folder:${COLOR_RESET}"
+            find "$task_dir" -type f -not -name "README.md" | while read -r file; do
+                echo -e "- ${COLOR_CYAN}$(basename "$file")${COLOR_RESET} ($(du -h "$file" | cut -f1))"
+            done
+        else
+            echo -e "${COLOR_CYAN}Files:${COLOR_RESET}       No additional files in folder"
+        fi
+    else
+        echo -e "${COLOR_CYAN}Folder:${COLOR_RESET}      Not created yet"
+    fi
+}
+
+# List pending tasks
+list_pending() {
+    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
+        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
+        return
+    fi
+    
+    echo -e "${COLOR_BLUE}Pending Academic Tasks:${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              ${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}------------------------------------------------${COLOR_RESET}"
+    
+    # Skip header line and process each task
+    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
+        if [ "$status" != "Completed" ]; then
+            # Find the line number using pattern matching
+            line_pattern="$name,$due_date,$description,$status"
+            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
+            
+            if [ -z "$line_number" ]; then
+                continue
+            fi
+            
+            # Adjust line number to be zero-based ID
+            line_number=$((line_number - 1))
+            
+            # Format name (truncate if too long)
+            if [ ${#name} -gt 20 ]; then
+                name="${name:0:17}..."
+            fi
+            
+            # Print task
+            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s\n" "$line_number" "$name" "$(format_date "$due_date")"
+        fi
+    done
+}
+
+# List tasks due today
+list_today() {
+    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
+        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
+        return
+    fi
+    
+    echo -e "${COLOR_BLUE}Tasks Due Today:${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}ID  | Name                    | Status     ${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}----------------------------------------${COLOR_RESET}"
+    
+    local today=$(date +%Y-%m-%d)
+    local found=false
+    
+    # Skip header line and process each task
+    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
+        if [ "$due_date" = "$today" ]; then
+            found=true
+            
+            # Find the line number using pattern matching
+            line_pattern="$name,$due_date,$description,$status"
+            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
+            
+            if [ -z "$line_number" ]; then
+                continue
+            fi
+            
+            # Adjust line number to be zero-based ID
+            line_number=$((line_number - 1))
+            
+            # Format name (truncate if too long)
+            if [ ${#name} -gt 20 ]; then
+                name="${name:0:17}..."
+            fi
+            
+            # Format status
+            if [ "$status" = "Completed" ]; then
+                status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
+            else
+                status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
+            fi
+            
+            # Print task
+            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %s\n" "$line_number" "$name" "$status_text"
+        fi
+    done
+    
+    if [ "$found" = false ]; then
+        echo -e "${COLOR_YELLOW}No tasks due today.${COLOR_RESET}"
+    fi
+}
+
+# List tasks due this week
+list_week() {
+    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
+        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
+        return
+    fi
+    
+    echo -e "${COLOR_BLUE}Tasks Due This Week:${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              | Status     ${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}----------------------------------------------------------${COLOR_RESET}"
+    
+    local found=false
+    
+    # Skip header line and process each task
+    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
+        local days=$(days_until_due "$due_date")
+        
+        if [ $days -ge 0 ] && [ $days -lt 7 ]; then
+            found=true
+            
+            # Find the line number using pattern matching
+            line_pattern="$name,$due_date,$description,$status"
+            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
+            
+            if [ -z "$line_number" ]; then
+                continue
+            fi
+            
+            # Adjust line number to be zero-based ID
+            line_number=$((line_number - 1))
+            
+            # Format name (truncate if too long)
+            if [ ${#name} -gt 20 ]; then
+                name="${name:0:17}..."
+            fi
+            
+            # Format status
+            if [ "$status" = "Completed" ]; then
+                status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
+            else
+                status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
+            fi
+            
+            # Print task
+            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s | %s\n" "$line_number" "$name" "$(format_date "$due_date")" "$status_text"
+        fi
+    done
+    
+    if [ "$found" = false ]; then
+        echo -e "${COLOR_YELLOW}No tasks due this week.${COLOR_RESET}"
+    fi
+}
+
+# Main function to process commands
+main() {
+    if [ $# -eq 0 ]; then
+        show_help
+        return
+    fi
+    
+    case "$1" in
+        list)
+            list_tasks
+            ;;
+        add)
+            add_task
+            ;;
+        complete)
+            complete_task "$2"
+            ;;
+        delete)
+            delete_task "$2"
+            ;;
+        edit)
+            edit_task "$2"
+            ;;
+        view)
+            view_task "$2"
+            ;;
+        pending)
+            list_pending
+            ;;
+        today)
+            list_today
+            ;;
+        week)
+            list_week
+            ;;
+        help)
+            show_help
+            ;;
+        *)
+            echo -e "${COLOR_RED}Unknown command: $1${COLOR_RESET}"
+            show_help
+            ;;
+    esac
+}
+
+# Run main function with all arguments
+main "$@"
+EOL
+
+    chmod +x "$SCRIPTS_DIR/academic/task_manager.sh"
+    
+    # Create an alias for easy access
+    if ! grep -q "alias task=" "$HOME/.bash_aliases" 2>/dev/null; then
+        echo 'alias task="$HOME/scripts/academic/task_manager.sh"' >> "$HOME/.bash_aliases"
+    fi
+    
+    return 0
+}
+
+setup_academic_tracker() {
+    info "Setting up Academic Project Tracker..."
+    
+    # Create the script if it doesn't exist
+    if [ ! -f "$SCRIPTS_DIR/academic/task_manager.sh" ]; then
+        create_academic_tracker_script
+    fi
+    
+    # Create an example task to show how it works
+    if [ ! -s "$SCRIPTS_DIR/academic/tasks.csv" ] || [ $(wc -l < "$SCRIPTS_DIR/academic/tasks.csv") -le 1 ]; then
+        echo "Name,Due Date,Description,Status" > "$SCRIPTS_DIR/academic/tasks.csv"
+        
+        # Calculate a due date one week from now using platform-specific date commands
+        if [ "$PLATFORM" == "macos" ]; then
+            # macOS date command
+            due_date=$(date -v+7d +%Y-%m-%d)
+        else
+            # Linux date command
+            due_date=$(date -d "+7 days" +%Y-%m-%d)
+        fi
+        
+        echo "Example Assignment,$due_date,This is an example assignment to demonstrate the task tracker.,Pending" >> "$SCRIPTS_DIR/academic/tasks.csv"
+        
+        # Create example folder
+        mkdir -p "$HOME/Uni/Example_Assignment"
+        
+        # Create README
+        cat > "$HOME/Uni/Example_Assignment/README.md" << EOF
+# Example Assignment
+
+**Due Date:** $due_date
+**Status:** Pending
+
+## Description
+This is an example assignment to demonstrate the task tracker.
+
+## Notes
+- This is just an example
+- You can add your own notes here
+
+## Resources
+- Course website: https://example.edu/course
+- Lecture notes: Week 3
+EOF
+
+        success "Example task created"
+    fi
+    
+    # Demonstrate the tool
+    echo ""
+    echo "===== Academic Project Tracker Demo ====="
+    bash "$SCRIPTS_DIR/academic/task_manager.sh" list
+    echo ""
+    echo "Available commands:"
+    echo "  task list              - List all tasks"
+    echo "  task add               - Add a new task"
+    echo "  task complete <id>     - Mark a task as complete"
+    echo "  task edit <id>         - Edit a task"
+    echo "  task view <id>         - View task details"
+    echo "  task week              - See tasks due this week"
+    echo ""
+    echo "Tasks are stored in: $SCRIPTS_DIR/academic/tasks.csv"
+    echo "Project folders are created in: $HOME/Uni/"
+    echo ""
+    
+    success "Academic Project Tracker setup complete"
+    
+    read -p "Press Enter to return to the main menu..."
+    show_menu
+}
+
+# ======= 9. Configure All Tools =======
+configure_all_tools() {
+    info "Configuring all tools..."
+    
+    # User information
+    read -p "Enter your full name for configuration [$DEFAULT_USERNAME]: " full_name
+    full_name=${full_name:-$DEFAULT_USERNAME}
+    
+    read -p "Enter your email for configuration [$DEFAULT_EMAIL]: " email
+    email=${email:-$DEFAULT_EMAIL}
+    
+    read -p "Enter your GitHub username [$DEFAULT_GITHUB_USERNAME]: " github_username
+    github_username=${github_username:-$DEFAULT_GITHUB_USERNAME}
+    
+    # Get Google Drive path for backups
+    backup_path=$(get_google_drive_path)
+    
+    # Update config files
+    if [ -f "$SCRIPTS_DIR/config/backup.conf" ]; then
+        # Use different sed syntax based on platform
+        if [ "$(uname)" == "Darwin" ]; then
+            # macOS sed
+            sed -i '' "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
+        else
+            # Linux sed
+            sed -i "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
+        fi
+        
+        success "Backup path set to $backup_path"
+    fi
+    
+    # Set up Git config
+    if [ -n "$full_name" ]; then
+        git config --global user.name "$full_name"
+        success "Git username set to: $full_name"
+    fi
+    
+    if [ -n "$email" ]; then
+        git config --global user.email "$email"
+        success "Git email set to: $email"
+    fi
+    
+    # Set up Zsh theme if zsh is installed
+    if [ -f "$HOME/.zshrc" ]; then
+        if grep -q "ZSH_THEME=\"robbyrussell\"" "$HOME/.zshrc"; then
+            if [ "$(uname)" == "Darwin" ]; then
+                # macOS sed
+                sed -i '' 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
+            else
+                # Linux sed
+                sed -i 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
+            fi
+            success "Zsh theme set to Powerlevel10k"
+        fi
+    fi
+    
+    # Configure VS Code settings if present
+    vs_code_dir=""
+    if [ -d "$HOME/.config/Code/User" ]; then
+        vs_code_dir="$HOME/.config/Code/User"
+    elif [ "$PLATFORM" == "wsl" ]; then
+        # Try to detect VS Code settings in Windows
+        WIN_USER=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r')
+        if [ -n "$WIN_USER" ] && [[ ! "$WIN_USER" == *"%" ]]; then
+            POTENTIAL_VSCODE_DIR="/mnt/c/Users/$WIN_USER/AppData/Roaming/Code/User"
+            if [ -d "$POTENTIAL_VSCODE_DIR" ]; then
+                vs_code_dir="$POTENTIAL_VSCODE_DIR"
+            fi
+        fi
+    fi
+    
+    if [ -n "$vs_code_dir" ]; then
+        mkdir -p "$vs_code_dir"
+        
+        # Create settings.json
+        cat > "$vs_code_dir/settings.json" << EOF
+{
+    "editor.fontFamily": "JetBrains Mono, Consolas, 'Courier New', monospace",
+    "editor.fontSize": 14,
+    "editor.lineHeight": 22,
+    "editor.fontWeight": "400",
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": true
+    },
+    "editor.bracketPairColorization.enabled": true,
+    "editor.guides.bracketPairs": true,
+    "editor.minimap.enabled": false,
+    "editor.rulers": [80, 100],
+    "editor.wordWrap": "on",
+    "explorer.confirmDelete": false,
+    "explorer.confirmDragAndDrop": false,
+    "files.associations": {
+        "*.css": "css"
+    },
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.exclude": {
+        "**/.git": true,
+        "**/.DS_Store": true,
+        "**/node_modules": true,
+        "**/__pycache__": true,
+        "**/venv": true,
+        ".pytest_cache": true,
+        ".coverage": true
+    },
+    "terminal.integrated.fontFamily": "JetBrains Mono, Consolas, 'Courier New', monospace",
+    "terminal.integrated.fontSize": 14,
+    "workbench.colorTheme": "One Dark Pro",
+    "workbench.iconTheme": "material-icon-theme",
+    "workbench.editor.enablePreview": false,
+    "workbench.startupEditor": "newUntitledFile",
+    "javascript.updateImportsOnFileMove.enabled": "always",
+    "javascript.format.enable": false,
+    "python.formatting.provider": "black",
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "python.linting.flake8Enabled": true,
+    "jupyter.themeMatplotlibPlots": true,
+    "jupyter.askForKernelRestart": false,
+    "[javascript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+    },
+    "[typescript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+    },
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "ms-python.python"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[html]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[css]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    }
+}
+EOF
+        
+        success "VS Code settings configured"
+    else
+        warning "VS Code settings directory not found. Skipping VS Code configuration."
+    fi
+    
+    success "All tools configured"
+    
+    read -p "Press Enter to return to the main menu..."
+    show_menu
+}
+
+# ======= Main Script Execution =======
+# Display the main menu to start
+show_menu
+            # Use different sed syntax based on platform (macOS vs Linux)
+            if [ "$(uname)" == "Darwin" ]; then
+                sed -i '' "s/ENCRYPTION_PASSWORD=\"\"/ENCRYPTION_PASSWORD=\"$encryption_password\"/" "$SCRIPTS_DIR/config/backup.conf"
+            else
+                sed -i "s/ENCRYPTION_PASSWORD=\"\"/ENCRYPTION_PASSWORD=\"$encryption_password\"/" "$SCRIPTS_DIR/config/backup.conf"
+            fi
+            
+            success "Encryption enabled and password set"
+            
+            # Security warning
+            warning "Note: Your encryption password is stored in plain text in $SCRIPTS_DIR/config/backup.conf"
+            warning "Consider restricting access to this file: chmod 600 $SCRIPTS_DIR/config/backup.conf"
+            
+            # Set appropriate permissions on the config file
+            chmod 600 "$SCRIPTS_DIR/config/backup.conf"
+        else
+            warning "No password provided, encryption may not work correctly"
+        fi
+    fi
+    
+    # Ask how many days to keep backups
+    read -p "How many days do you want to keep backups? (default: 30): " retention_days
+    
+    if [ -n "$retention_days" ] && [[ "$retention_days" =~ ^[0-9]+$ ]]; then
+        # Use different sed syntax based on platform (macOS vs Linux)
+        if [ "$(uname)" == "Darwin" ]; then
+            sed -i '' "s/RETENTION_DAYS=30/RETENTION_DAYS=$retention_days/" "$SCRIPTS_DIR/config/backup.conf"
+        else
+            sed -i "s/RETENTION_DAYS=30/RETENTION_DAYS=$retention_days/" "$SCRIPTS_DIR/config/backup.conf"
+        fi
+        
+        success "Backup retention set to $retention_days days"
+    fi
+    
+    # Ask if they want to run it now
+    read -p "Do you want to run the backup now? (y/n): " run_now
+    
+    if [[ "$run_now" =~ ^[Yy]$ ]]; then
+        # Source the updated config before running
+        source "$SCRIPTS_DIR/config/backup.conf"
+        
+        # Check access to backup location before running
+        if [ ! -d "$BACKUP_BASE_DIR" ]; then
+            warning "Backup location $BACKUP_BASE_DIR doesn't exist or is not accessible"
+            
+            if [ "$PLATFORM" == "wsl" ]; then
+                # For WSL, provide more specific guidance about Google Drive paths
+                info "The Google Drive path is not accessible from WSL."
+                info "Check that G: drive is properly mounted in Windows"
+                info "Make sure 'G:\\My Drive\\Backups' exists in Windows Explorer"
+                
+                read -p "Try to create the backup directory manually? (y/n): " create_dir
+                
+                if [[ "$create_dir" =~ ^[Yy]$ ]]; then
+                    # Try a more robust directory creation approach
+                    mkdir -p "$BACKUP_BASE_DIR" 2>/dev/null
+                    
+                    if [ ! -d "$BACKUP_BASE_DIR" ]; then
+                        # If that fails, try using cmd.exe as fallback
+                        win_path=$(echo "$BACKUP_BASE_DIR" | sed 's|/mnt/\([a-z]\)|\U\1:|' | sed 's|/|\\|g')
+                        cmd.exe /C "mkdir \"$win_path\"" 2>/dev/null
+                        
+                        # Check again
+                        if [ ! -d "$BACKUP_BASE_DIR" ]; then
+                            error "Could not create backup directory."
+                            info "Please create the following directory manually in Windows:"
+                            info "G:\\My Drive\\Backups"
+                            
+                            read -p "Press Enter to continue..."
+                            return 1
+                        fi
+                    fi
+                else
+                    warning "Backup cannot proceed without a valid backup location"
+                    info "Please create the directory manually and try again"
+                    read -p "Press Enter to continue..."
+                    return 1
+                fi
+            else
+                # For non-WSL platforms
+                read -p "Do you want to create it? (y/n): " create_dir
+                
+                if [[ "$create_dir" =~ ^[Yy]$ ]]; then
+                    mkdir -p "$BACKUP_BASE_DIR"
+                    if [ $? -ne 0 ]; then
+                        error "Failed to create backup directory. Please check your configuration."
+                        info "You may need to create the directory manually or specify a different location."
+                        return 1
+                    fi
+                else
+                    warning "Backup cannot proceed without a valid backup location"
+                    info "Please create the directory manually and try again"
+                    read -p "Press Enter to continue..."
+                    return 1
+                fi
+            fi
+        fi
+        
+        # Run the backup with error handling
+        if ! bash "$SCRIPTS_DIR/backup/backup_projects.sh"; then
+            error "Backup failed. Check logs for details: $SCRIPTS_DIR/logs/"
+        else
+            success "Backup completed successfully"
+        fi
+    fi
+    
+    # Ask if they want to schedule it
+    read -p "Do you want to schedule this to run weekly? (y/n): " schedule_it
+    
+    if [[ "$schedule_it" =~ ^[Yy]$ ]]; then
+        # Create scheduled task script with improved robustness
+        cat > "$SCRIPTS_DIR/backup/setup_backup_task.ps1" << 'EOL'
+# Setup Windows Task Scheduler for Weekly Backup
+# Run this with PowerShell as Administrator
+
+$ErrorActionPreference = "Stop"
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+
+# Check if running as Administrator
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "❌ This script needs to be run as Administrator." -ForegroundColor Red
+    Write-Host "Please right-click the PowerShell icon and select 'Run as administrator', then try again." -ForegroundColor Yellow
+    exit 1
+}
+
+try {
+    $taskName = "WeeklySystemBackup"
+    $taskDescription = "Weekly backup of projects and configuration files"
+    $scriptPath = "$env:USERPROFILE\scripts\backup\backup_projects.bat"
+
+    # Check for WSL paths
+    $wslPath = Get-ChildItem "$env:USERPROFILE\AppData\Local\Packages\*Ubuntu*\LocalState\rootfs\home\*\scripts\backup\backup_projects.bat" -ErrorAction SilentlyContinue
+    
+    if ($wslPath) {
+        Write-Host "Found WSL script at: $($wslPath.FullName)" -ForegroundColor Cyan
+        $scriptPath = $wslPath.FullName
+    }
+    
+    # Verify script exists
+    if (-not (Test-Path $scriptPath)) {
+        Write-Host "❌ Script not found at: $scriptPath" -ForegroundColor Red
+        $manualPath = Read-Host "Enter the full path to backup_projects.bat (or press Enter to cancel)"
+        
+        if ([string]::IsNullOrEmpty($manualPath)) {
+            Write-Host "Task setup cancelled." -ForegroundColor Yellow
+            exit 1
+        }
+        
+        if (-not (Test-Path $manualPath)) {
+            Write-Host "❌ Script still not found. Please verify the path and try again." -ForegroundColor Red
+            exit 1
+        }
+        
+        $scriptPath = $manualPath
+    }
+
+    # Create a new task action
+    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$scriptPath`""
+
+    # Create a trigger to run weekly on Sunday at 2 AM
+    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 2am
+
+    # Register the task with higher privileges
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Description $taskDescription -RunLevel Highest -Force
+
+    Write-Host "✅ Weekly backup scheduled task created successfully!" -ForegroundColor Green
+    Write-Host "⏰ The task will run every Sunday at 2:00 AM" -ForegroundColor Cyan
+}
+catch {
+    Write-Host "❌ Error creating scheduled task: $_" -ForegroundColor Red
+    exit 1
+}
+EOL
+
+        success "PowerShell script for task scheduling created"
+        info "To schedule the task, please run the PowerShell script as administrator:"
+        info "PowerShell.exe -ExecutionPolicy Bypass -File \"$SCRIPTS_DIR/backup/setup_backup_task.ps1\""
+    fi
+    
+    success "System Backup setup complete"
+    
+    # Add a reminder about backup in .zshrc if not already present
+    if [ -f "$HOME/.zshrc" ] && ! grep -q "backup_projects.sh" "$HOME/.zshrc"; then
+        cat >> "$HOME/.zshrc" << 'EOL'
+
+# Backup reminder - check if it's been more than 7 days since last backup
+if [ -f ~/last_backup.txt ]; then
+    last_backup=$(cat ~/last_backup.txt)
+    today=$(date +%Y-%m-%d)
+    
+    # Handle different date commands based on OS
+    if [ "$(uname)" == "Darwin" ]; then
+        # macOS
+        last_backup_seconds=$(date -j -f "%Y-%m-%d" "$last_backup" +%s)
+        today_seconds=$(date -j -f "%Y-%m-%d" "$today" +%s)
+    else
+        # Linux
+        last_backup_seconds=$(date -d "$last_backup" +%s)
+        today_seconds=$(date -d "$today" +%s)
+    fi
+    
+    days_diff=$(( (today_seconds - last_backup_seconds) / 86400 ))
+    
+    if [ $days_diff -gt 7 ]; then
+        echo "⚠️  It's been $days_diff days since your last backup. Consider running: backup"
+    fi
+fi
+EOL
+
+        success "Backup reminder added to .zshrc"
+    fi
+    
+    read -p "Press Enter to return to the main menu..."
+    show_menu
+}
+
+# ======= 8. Academic Project Tracker =======
+create_academic_tracker_script() {
+    info "Creating Academic Project Tracker script..."
+    
+    mkdir -p "$SCRIPTS_DIR/academic"
+    
+    cat > "$SCRIPTS_DIR/academic/task_manager.sh" << 'EOL'
+#!/bin/bash
+# Academic Task Manager
+# Helps track assignments, projects, and deadlines
+
+set -e
+
+# Configuration
+SCRIPT_DIR="$HOME/scripts"
+CONFIG_DIR="$SCRIPT_DIR/config"
+TASKS_FILE="$SCRIPT_DIR/academic/tasks.csv"
+UNI_DIR="$HOME/Uni"
+
+# Function to detect platform - WSL, Linux, or macOS
+detect_platform() {
+    if grep -q Microsoft /proc/version 2>/dev/null; then
+        echo "wsl"
+    elif [[ "$(uname)" == "Darwin" ]]; then
+        echo "macos"
+    else
+        echo "linux"
+    fi
+}
+
+PLATFORM=$(detect_platform)
+
+# Create directories if they don't exist
+mkdir -p "$SCRIPT_DIR/academic"
+mkdir -p "$UNI_DIR"
+
+# Create tasks file if it doesn't exist
+if [ ! -f "$TASKS_FILE" ]; then
+    echo "Name,Due Date,Description,Status" > "$TASKS_FILE"
+fi
+
+# Colorized output
+COLOR_RED='\033[0;31m'
+COLOR_GREEN='\033[0;32m'
+COLOR_YELLOW='\033[0;33m'
+COLOR_BLUE='\033[0;34m'
+COLOR_PURPLE='\033[0;35m'
+COLOR_CYAN='\033[0;36m'
+COLOR_RESET='\033[0m'
+
+# Help function
+show_help() {
+    echo -e "${COLOR_BLUE}Academic Task Manager${COLOR_RESET}"
+    echo -e "${COLOR_GREEN}Usage:${COLOR_RESET} $(basename $0) [command] [options]"
+    echo ""
+    echo -e "${COLOR_YELLOW}Commands:${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}list${COLOR_RESET}                   List all tasks"
+    echo -e "  ${COLOR_CYAN}add${COLOR_RESET}                    Add a new task"
+    echo -e "  ${COLOR_CYAN}complete ${COLOR_RED}<id>${COLOR_RESET}           Mark a task as complete"
+    echo -e "  ${COLOR_CYAN}delete ${COLOR_RED}<id>${COLOR_RESET}             Delete a task"
+    echo -e "  ${COLOR_CYAN}edit ${COLOR_RED}<id>${COLOR_RESET}               Edit a task"
+    echo -e "  ${COLOR_CYAN}view ${COLOR_RED}<id>${COLOR_RESET}               View task details"
+    echo -e "  ${COLOR_CYAN}pending${COLOR_RESET}                List pending tasks"
+    echo -e "  ${COLOR_CYAN}today${COLOR_RESET}                  List tasks due today"
+    echo -e "  ${COLOR_CYAN}week${COLOR_RESET}                   List tasks due this week"
+    echo -e "  ${COLOR_CYAN}help${COLOR_RESET}                   Show this help message"
+    echo ""
+    echo -e "${COLOR_YELLOW}Examples:${COLOR_RESET}"
+    echo -e "  $(basename $0) add"
+    echo -e "  $(basename $0) list"
+    echo -e "  $(basename $0) complete 2"
+    echo ""
+}
+
+# Function to validate date format
+validate_date() {
+    local date_str="$1"
+    
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS date validation
+        date -j -f "%Y-%m-%d" "$date_str" >/dev/null 2>&1
+    else
+        # Linux date validation
+        date -d "$date_str" >/dev/null 2>&1
+    fi
+    
+    return $?
+}
+
+# Function to calculate days until due
+days_until_due() {
+    local due_date="$1"
+    local today=$(date +%s)
+    local due
+    
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS
+        due=$(date -j -f "%Y-%m-%d" "$due_date" +%s)
+    else
+        # Linux
+        due=$(date -d "$due_date" +%s)
+    fi
+    
+    echo $(( (due - today) / 86400 ))
+}
+
+# Format date output
+format_date() {
+    local date_str="$1"
+    local days=$(days_until_due "$date_str")
+    local formatted_date
+    
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS
+        formatted_date=$(date -j -f "%Y-%m-%d" "$date_str" "+%Y-%m-%d")
+    else
+        # Linux
+        formatted_date=$(date -d "$date_str" "+%Y-%m-%d")
+    fi
+    
+    if [ $days -lt 0 ]; then
+        echo -e "${COLOR_RED}$formatted_date (${days#-} days overdue)${COLOR_RESET}"
+    elif [ $days -eq 0 ]; then
+        echo -e "${COLOR_RED}$formatted_date (Due today)${COLOR_RESET}"
+    elif [ $days -eq 1 ]; then
+        echo -e "${COLOR_YELLOW}$formatted_date (Due tomorrow)${COLOR_RESET}"
+    elif [ $days -le 7 ]; then
+        echo -e "${COLOR_YELLOW}$formatted_date (Due in $days days)${COLOR_RESET}"
+    else
+        echo -e "${COLOR_GREEN}$formatted_date (Due in $days days)${COLOR_RESET}"
+    fi
+}
+
+# List tasks
+list_tasks() {
+    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
+        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
+        return
+    fi
+    
+    echo -e "${COLOR_BLUE}Academic Tasks:${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              | Status     ${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}----------------------------------------------------------${COLOR_RESET}"
+    
+    # Skip header line and process each task
+    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
+        # Find the line number by pattern matching the entire line
+        # We use pattern matching instead of line counter to handle potential issues with different IFS settings
+        line_pattern="$name,$due_date,$description,$status"
+        line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
+        
+        if [ -z "$line_number" ]; then
+            continue
+        fi
+        
+        # Adjust line number to be zero-based ID
+        line_number=$((line_number - 1))
+        
+        # Format name (truncate if too long)
+        if [ ${#name} -gt 20 ]; then
+            name="${name:0:17}..."
+        fi
+        
+        # Format status
+        if [ "$status" = "Completed" ]; then
+            status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
+        else
+            status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
+        fi
+        
+        # Print task
+        printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s | %s\n" "$line_number" "$name" "$(format_date "$due_date")" "$status_text"
+    done
+}
+
+# Add a new task
+add_task() {
+    echo -e "${COLOR_BLUE}Add a new academic task:${COLOR_RESET}"
+    
+    # Get task details
+    read -p "Task name: " name
+    
+    while true; do
+        read -p "Due date (YYYY-MM-DD): " due_date
+        if validate_date "$due_date"; then
+            break
+        else
+            echo -e "${COLOR_RED}Invalid date format. Please use YYYY-MM-DD.${COLOR_RESET}"
+        fi
+    done
+    
+    read -p "Description: " description
+    
+    # Add task to CSV, escaping any commas in the name or description
+    # Replace any existing commas with semicolons to avoid CSV field issues
+    safe_name="${name//,/;}"
+    safe_description="${description//,/;}"
+    
+    echo "$safe_name,$due_date,$safe_description,Pending" >> "$TASKS_FILE"
+    
+    # Create folder for the task
+    task_dir="$UNI_DIR/$(echo "$safe_name" | tr ' ' '_')"
+    mkdir -p "$task_dir"
+    
+    # Create README for the task
+    cat > "$task_dir/README.md" << EOF
+# $safe_name
+
+**Due Date:** $due_date
+**Status:** Pending
+
+## Description
+$safe_description
+
+## Notes
+- 
+
+## Resources
+- 
+EOF
+    
+    echo -e "${COLOR_GREEN}Task added successfully!${COLOR_RESET}"
+    echo -e "${COLOR_BLUE}Task folder created at: ${COLOR_CYAN}$task_dir${COLOR_RESET}"
+}
+
+# Mark a task as complete
+complete_task() {
+    if [ -z "$1" ]; then
+        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
+        return 1
+    fi
+    
+    local task_id="$1"
+    local line_number=$((task_id + 1))
+    
+    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
+        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
+        return 1
+    fi
+    
+    # Get task details
+    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
+    IFS=, read -r name due_date description status <<< "$task_line"
+    
+    if [ "$status" = "Completed" ]; then
+        echo -e "${COLOR_YELLOW}Task is already marked as completed.${COLOR_RESET}"
+        return 0
+    fi
+    
+    # Update task status using platform-specific sed commands
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS sed
+        sed -i '' "${line_number}s/,Pending\$/,Completed/" "$TASKS_FILE"
+    else
+        # Linux sed
+        sed -i "${line_number}s/,Pending\$/,Completed/" "$TASKS_FILE"
+    fi
+    
+    # Update README in task folder
+    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+    if [ -f "$task_dir/README.md" ]; then
+        if [ "$PLATFORM" == "macos" ]; then
+            # macOS sed
+            sed -i '' "s/\*\*Status:\*\* Pending/\*\*Status:\*\* Completed/" "$task_dir/README.md"
+        else
+            # Linux sed
+            sed -i "s/\*\*Status:\*\* Pending/\*\*Status:\*\* Completed/" "$task_dir/README.md"
+        fi
+    fi
+    
+    echo -e "${COLOR_GREEN}Task marked as completed!${COLOR_RESET}"
+}
+
+# Delete a task
+delete_task() {
+    if [ -z "$1" ]; then
+        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
+        return 1
+    fi
+    
+    local task_id="$1"
+    local line_number=$((task_id + 1))
+    
+    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
+        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
+        return 1
+    fi
+    
+    # Get task details before deleting
+    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
+    IFS=, read -r name due_date description status <<< "$task_line"
+    
+    # Confirm deletion
+    read -p "Are you sure you want to delete task '$name'? (y/n): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${COLOR_YELLOW}Task deletion cancelled.${COLOR_RESET}"
+        return 0
+    fi
+    
+    # Delete task from CSV using platform-specific sed commands
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS sed
+        sed -i '' "${line_number}d" "$TASKS_FILE"
+    else
+        # Linux sed
+        sed -i "${line_number}d" "$TASKS_FILE"
+    fi
+    
+    # Ask about task folder
+    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+    if [ -d "$task_dir" ]; then
+        read -p "Do you want to delete the task folder as well? (y/n): " delete_folder
+        if [[ "$delete_folder" =~ ^[Yy]$ ]]; then
+            rm -rf "$task_dir"
+            echo -e "${COLOR_GREEN}Task folder deleted.${COLOR_RESET}"
+        else
+            echo -e "${COLOR_YELLOW}Task folder kept at: ${COLOR_CYAN}$task_dir${COLOR_RESET}"
+        fi
+    fi
+    
+    echo -e "${COLOR_GREEN}Task deleted successfully!${COLOR_RESET}"
+}
+
+# Edit a task
+edit_task() {
+    if [ -z "$1" ]; then
+        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
+        return 1
+    fi
+    
+    local task_id="$1"
+    local line_number=$((task_id + 1))
+    
+    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
+        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
+        return 1
+    fi
+    
+    # Get task details
+    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
+    IFS=, read -r name due_date description status <<< "$task_line"
+    
+    echo -e "${COLOR_BLUE}Editing task:${COLOR_RESET} ${COLOR_CYAN}$name${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}(Leave field empty to keep current value)${COLOR_RESET}"
+    
+    # Get new values
+    read -p "Task name [$name]: " new_name
+    new_name=${new_name:-$name}
+    
+    while true; do
+        read -p "Due date [$due_date]: " new_due_date
+        new_due_date=${new_due_date:-$due_date}
+        
+        if [ -z "$new_due_date" ] || validate_date "$new_due_date"; then
+            break
+        else
+            echo -e "${COLOR_RED}Invalid date format. Please use YYYY-MM-DD.${COLOR_RESET}"
+        fi
+    done
+    
+    read -p "Description [$description]: " new_description
+    new_description=${new_description:-$description}
+    
+    read -p "Status (Pending/Completed) [$status]: " new_status
+    new_status=${new_status:-$status}
+    
+    # Validate status
+    if [ "$new_status" != "Pending" ] && [ "$new_status" != "Completed" ]; then
+        echo -e "${COLOR_RED}Invalid status. Using '$status'.${COLOR_RESET}"
+        new_status=$status
+    fi
+    
+    # Escape any commas to avoid CSV issues
+    safe_new_name="${new_name//,/;}"
+    safe_new_description="${new_description//,/;}"
+    
+    # Update task in CSV using platform-specific sed commands
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS sed
+        sed -i '' "${line_number}s/.*/$safe_new_name,$new_due_date,$safe_new_description,$new_status/" "$TASKS_FILE"
+    else
+        # Linux sed
+        sed -i "${line_number}s/.*/$safe_new_name,$new_due_date,$safe_new_description,$new_status/" "$TASKS_FILE"
+    fi
+    
+    # Handle task folder if name changed
+    if [ "$name" != "$new_name" ]; then
+        old_task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+        new_task_dir="$UNI_DIR/$(echo "$new_name" | tr ' ' '_')"
+        
+        if [ -d "$old_task_dir" ]; then
+            # Move folder if it exists
+            mv "$old_task_dir" "$new_task_dir"
+            echo -e "${COLOR_BLUE}Task folder renamed to: ${COLOR_CYAN}$new_task_dir${COLOR_RESET}"
+        else
+            # Create new folder
+            mkdir -p "$new_task_dir"
+            echo -e "${COLOR_BLUE}New task folder created at: ${COLOR_CYAN}$new_task_dir${COLOR_RESET}"
+        fi
+        
+        # Update README
+        if [ -f "$new_task_dir/README.md" ]; then
+            # Update README content with platform-specific sed commands
+            if [ "$PLATFORM" == "macos" ]; then
+                # macOS sed
+                sed -i '' "s/^# .*$/# $new_name/" "$new_task_dir/README.md"
+                sed -i '' "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$new_task_dir/README.md" 
+                sed -i '' "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$new_task_dir/README.md"
+            else
+                # Linux sed
+                sed -i "s/^# .*$/# $new_name/" "$new_task_dir/README.md"
+                sed -i "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$new_task_dir/README.md"
+                sed -i "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$new_task_dir/README.md"
+            fi
+            
+            # Update description - this is trickier with sed, so we'll use a temp file
+            awk -v desc="$new_description" '
+            BEGIN{replaced=0}
+            /^## Description/{print; print desc; getline; replaced=1; next}
+            {print}
+            ' "$new_task_dir/README.md" > "$new_task_dir/README.md.tmp" 
+            
+            mv "$new_task_dir/README.md.tmp" "$new_task_dir/README.md"
+        else
+            # Create new README
+            cat > "$new_task_dir/README.md" << EOF
+# $new_name
+
+**Due Date:** $new_due_date
+**Status:** $new_status
+
+## Description
+$new_description
+
+## Notes
+- 
+
+## Resources
+- 
+EOF
+        fi
+    else
+        # Just update README in existing folder
+        task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+        if [ -f "$task_dir/README.md" ]; then
+            if [ "$PLATFORM" == "macos" ]; then
+                # macOS sed
+                sed -i '' "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$task_dir/README.md"
+                sed -i '' "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$task_dir/README.md"
+            else
+                # Linux sed
+                sed -i "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$task_dir/README.md"
+                sed -i "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$task_dir/README.md"
+            fi
+            
+            # Update description
+            awk -v desc="$new_description" '
+            BEGIN{replaced=0}
+            /^## Description/{print; print desc; getline; replaced=1; next}
+            {print}
+            ' "$task_dir/README.md" > "$task_dir/README.md.tmp"
+            
+            mv "$task_dir/README.md.tmp" "$task_dir/README.md"
+        fi
+    fi
+    
+    echo -e "${COLOR_GREEN}Task updated successfully!${COLOR_RESET}"
+}
+
+# View task details
+view_task() {
+    if [ -z "$1" ]; then
+        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
+        return 1
+    fi
+    
+    local task_id="$1"
+    local line_number=$((task_id + 1))
+    
+    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
+        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
+        if [[ "\$PROJECTS_BACKUP" == *.enc ]]; then
+        echo "🔑 Enter decryption password for Projects backup:"
+        read -s password
+        openssl enc -aes-256-cbc -d -in "\$PROJECTS_BACKUP" -out "Projects_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
+        PROJECTS_BACKUP="Projects_${BACKUP_TIMESTAMP}.tar.gz"
+    fi
+    
+    echo "📂 Extracting Projects backup..."
+    mkdir -p "$HOME/Projects"
+    tar -xzf "\$PROJECTS_BACKUP" -C "$HOME"
+    echo "✅ Projects restored to $HOME/Projects"
+fi
+
+# Extract university files
+UNI_BACKUP="\$(ls University_${BACKUP_TIMESTAMP}.tar.gz 2>/dev/null || ls University_${BACKUP_TIMESTAMP}.tar.gz.enc 2>/dev/null)"
+if [ -n "\$UNI_BACKUP" ]; then
+    if [[ "\$UNI_BACKUP" == *.enc ]]; then
+        echo "🔑 Enter decryption password for University backup:"
+        read -s password
+        openssl enc -aes-256-cbc -d -in "\$UNI_BACKUP" -out "University_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
+        UNI_BACKUP="University_${BACKUP_TIMESTAMP}.tar.gz"
+    fi
+    
+    echo "📂 Extracting University backup..."
+    mkdir -p "$HOME/Uni"
+    tar -xzf "\$UNI_BACKUP" -C "$HOME"
+    echo "✅ University files restored to $HOME/Uni"
+fi
+
+# Extract configuration files
+CONFIG_BACKUP="\$(ls configs_${BACKUP_TIMESTAMP}.tar.gz 2>/dev/null || ls configs_${BACKUP_TIMESTAMP}.tar.gz.enc 2>/dev/null)"
+if [ -n "\$CONFIG_BACKUP" ]; then
+    if [[ "\$CONFIG_BACKUP" == *.enc ]]; then
+        echo "🔑 Enter decryption password for configuration files backup:"
+        read -s password
+        openssl enc -aes-256-cbc -d -in "\$CONFIG_BACKUP" -out "configs_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
+        CONFIG_BACKUP="configs_${BACKUP_TIMESTAMP}.tar.gz"
+    fi
+    
+    echo "📂 Extracting configuration files..."
+    mkdir -p "configs_temp"
+    tar -xzf "\$CONFIG_BACKUP" -C "configs_temp"
+    
+    # Backup existing configs before overwriting
+    BACKUP_DIR="\$HOME/.config_backup_$(date +%Y%m%d%H%M%S)"
+    mkdir -p "\$BACKUP_DIR"
+    
+    # Copy each file back to its proper location
+    find "configs_temp/configs" -type f | while read file; do
+        relative_path="\${file#configs_temp/configs/}"
+        target_path="\$HOME/\$relative_path"
+        
+        # Backup existing file if it exists
+        if [ -f "\$target_path" ]; then
+            mkdir -p "\$(dirname "\$BACKUP_DIR/\$relative_path")"
+            cp "\$target_path" "\$BACKUP_DIR/\$relative_path"
+        fi
+        
+        # Create the directory if it doesn't exist
+        mkdir -p "\$(dirname "\$target_path")"
+        
+        # Copy the file
+        cp "\$file" "\$target_path"
+        echo "✅ Restored \$relative_path"
+    done
+    
+    # Clean up
+    rm -rf "configs_temp"
+    echo "✅ Configuration files restored"
+    echo "⚠️ Original configuration files have been backed up to \$BACKUP_DIR"
+fi
+
+echo "✅ Backup restoration completed!"
+EOF
+
+chmod +x "${BACKUP_DIR}/restore_backup.sh"
+log "✅ Created restore script: ${BACKUP_DIR}/restore_backup.sh"
+
+exit 0
+EOL
+
+    chmod +x "$SCRIPTS_DIR/backup/backup_projects.sh"
+    
+    # Create Windows batch file to trigger the script
+    cat > "$SCRIPTS_DIR/backup/backup_projects.bat" << 'EOL'
+@echo off
+:: Run Projects Backup script via WSL
+wsl bash -c "~/scripts/backup/backup_projects.sh"
+EOL
+    
+    # Create configuration file
+    mkdir -p "$SCRIPTS_DIR/config"
+    
+    cat > "$SCRIPTS_DIR/config/backup.conf" << 'EOL'
+# Configuration for System Backup Script
+
+# Backup locations
+BACKUP_BASE_DIR="/mnt/g/My Drive/Backups"
+PROJECTS_DIR="$HOME/Projects"
+UNI_DIR="$HOME/Uni"
+
+# Backup settings
+BACKUP_CONFIG_FILES=true
+BACKUP_ENCRYPTION=false
+ENCRYPTION_PASSWORD=""
+RETENTION_DAYS=30
+EOL
+
+    return 0
+}
+
+create_system_backup() {
+    info "Setting up System Backup..."
+    
+    # Create the scripts if they don't exist
+    if [ ! -f "$SCRIPTS_DIR/backup/backup_projects.sh" ]; then
+        create_backup_scripts
+    fi
+    
+    # Make sure config directory exists
+    mkdir -p "$SCRIPTS_DIR/config"
+    
+    # Create default config if it doesn't exist
+    if [ ! -f "$SCRIPTS_DIR/config/backup.conf" ]; then
+        cat > "$SCRIPTS_DIR/config/backup.conf" << 'EOL'
+# Configuration for System Backup Script
+
+# Backup locations
+BACKUP_BASE_DIR="/mnt/g/My Drive/Backups"
+PROJECTS_DIR="$HOME/Projects"
+UNI_DIR="$HOME/Uni"
+
+# Backup settings
+BACKUP_CONFIG_FILES=true
+BACKUP_ENCRYPTION=false
+ENCRYPTION_PASSWORD=""
+RETENTION_DAYS=30
+EOL
+    fi
+    
+    # Get Google Drive path
+    backup_path=$(get_google_drive_path)
+    
+    if [ -n "$backup_path" ]; then
+        # Use different sed syntax based on platform (macOS vs Linux)
+        if [ "$(uname)" == "Darwin" ]; then
+            sed -i '' "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
+        else
+            sed -i "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
+        fi
+        
+        success "Backup location set to $backup_path"
+        
+        # Create the backup directory structure if it doesn't exist
+        if [ ! -d "$backup_path" ]; then
+            info "Attempting to create backup directory: $backup_path"
+            mkdir -p "$backup_path"
+            
+            if [ $? -ne 0 ]; then
+                warning "Could not create backup directory automatically"
+                warning "You may need to create it manually or check drive mapping"
+                
+                if [ "$PLATFORM" == "wsl" ]; then
+                    info "For WSL, make sure your Google Drive is mounted correctly"
+                    info "Try to create this path from Windows Explorer: G:\\My Drive\\Backups"
+                fi
+            else
+                success "Created backup directory: $backup_path"
+            fi
+        fi
+    else
+        error "No backup path provided. Backup location may not work correctly."
+    fi
+    
+    # Ask if they want to enable encryption
+    read -p "Do you want to enable backup encryption? (y/n): " enable_encryption
+    
+    if [[ "$enable_encryption" =~ ^[Yy]$ ]]; then
+        # Use different sed syntax based on platform (macOS vs Linux)
+        if [ "$(uname)" == "Darwin" ]; then
+            sed -i '' "s/BACKUP_ENCRYPTION=false/BACKUP_ENCRYPTION=true/" "$SCRIPTS_DIR/config/backup.conf"
+        else
+            sed -i "s/BACKUP_ENCRYPTION=false/BACKUP_ENCRYPTION=true/" "$SCRIPTS_DIR/config/backup.conf"
+        fi
+        
+        # Ask for encryption password and store it securely
+        read -s -p "Enter encryption password: " encryption_password
+        echo ""
+        
+        if [ -n "$encryption_password" ]; then
+            # Use different sed syntax based on platform (macOS vs Linux)
+            if [ "$(u            if [ -d "$DOTFILES_DIR/vscode/snippets" ]; then
+                # Backup existing snippets if they exist
+                if [ -d "$VSCODE_DIR/snippets" ]; then
+                    mkdir -p "$BACKUP_DIR/vscode"
+                    cp -r "$VSCODE_DIR/snippets" "$BACKUP_DIR/vscode/"
+                    log "Backed up existing VS Code snippets to $BACKUP_DIR/vscode/"
+                fi
+                
+                mkdir -p "$VSCODE_DIR/snippets"
+                cp -r "$DOTFILES_DIR/vscode/snippets/"* "$VSCODE_DIR/snippets/"
+                log "Restored VS Code snippets"
+            fi
+        else
+            log "Warning: VS Code settings directory not found, skipping VS Code settings restoration"
+        fi
+    fi
+    
+    log "Restore completed successfully"
+    
+    if [ "$(ls -A "$BACKUP_DIR")" ]; then
+        log "Your original files have been backed up to $BACKUP_DIR"
+    else
+        # Remove empty backup directory
+        rmdir "$BACKUP_DIR"
+    fi
+}
+
+# Parse command line arguments
+if [ $# -eq 0 ]; then
+    show_help
+fi
+
+case "$1" in
+    --setup)
+        check_git
+        setup_repo
+        ;;
+    --backup)
+        check_git
+        backup_dotfiles
+        ;;
+    --restore)
+        check_git
+        restore_dotfiles
+        ;;
+    --help)
+        show_help
+        ;;
+    *)
+        echo "Unknown option: $1"
+        show_help
+        ;;
+esac
+
+exit 0
+EOL
+
+    chmod +x "$SCRIPTS_DIR/backup/sync_dotfiles.sh"
+    
+    # Create configuration file
+    mkdir -p "$SCRIPTS_DIR/config"
+    
+    cat > "$SCRIPTS_DIR/config/dotfiles_sync.conf" << 'EOL'
+# Configuration for Dotfiles Sync Script
+
+# Repository settings
+DOTFILES_DIR="$HOME/.dotfiles"
+DOTFILES_REPO=""  # Set this to your GitHub repository URL
+DOTFILES_BRANCH="main"
+
+# Files to sync
+SYNC_FILES=(
+    ".zshrc"
+    ".bashrc"
+    ".bash_aliases"
+    ".gitconfig"
+    ".vimrc"
+    ".tmux.conf"
+    ".prettierrc"
+    ".editorconfig"
+)
+
+# VS Code settings
+SYNC_VSCODE=true
+VSCODE_SETTINGS_DIR="$HOME/.config/Code/User"
+VSCODE_SETTINGS_WIN_DIR="/mnt/c/Users/$USER/AppData/Roaming/Code/User"
+EOL
+
+    return 0
+}
+
+setup_dotfiles_syncer() {
+    info "Setting up Dotfiles Syncer..."
+    
+    # Create the script if it doesn't exist
+    if [ ! -f "$SCRIPTS_DIR/backup/sync_dotfiles.sh" ]; then
+        create_dotfiles_syncer_script
+    fi
+    
+    # Ask for repository URL
+    read -p "Enter your GitHub repository URL for dotfiles (e.g., git@github.com:username/dotfiles.git): " repo_url
+    
+    if [ -n "$repo_url" ]; then
+        # Update the config file
+        if [ "$(uname)" == "Darwin" ]; then
+            sed -i '' "s|DOTFILES_REPO=\"\"|DOTFILES_REPO=\"$repo_url\"|" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
+        else
+            sed -i "s|DOTFILES_REPO=\"\"|DOTFILES_REPO=\"$repo_url\"|" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
+        fi
+        
+        success "Repository URL set to $repo_url"
+    else
+        warning "No repository URL provided. You'll need to set it up later."
+    fi
+    
+    # Ask which files to sync
+    read -p "Do you want to customize which files to sync? (y/n): " customize_files
+    
+    if [[ "$customize_files" =~ ^[Yy]$ ]]; then
+        echo "Enter the files you want to sync (separated by space):"
+        echo "For example: .zshrc .bashrc .gitconfig"
+        read -p "> " custom_files
+        
+        if [ -n "$custom_files" ]; then
+            # Update the config file
+            echo "SYNC_FILES=(" > "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
+            for file in $custom_files; do
+                echo "    \"$file\"" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
+            done
+            echo ")" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
+            
+            # Get the rest of the config file
+            grep -v "^SYNC_FILES=" "$SCRIPTS_DIR/config/dotfiles_sync.conf" | grep -v "^)" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
+            
+            # Replace the config file
+            mv "$SCRIPTS_DIR/config/dotfiles_sync.conf.new" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
+            
+            success "Custom files set for syncing"
+        fi
+    fi
+    
+    # Ask if they want to set up the repository now
+    read -p "Do you want to set up the dotfiles repository now? (y/n): " setup_now
+    
+    if [[ "$setup_now" =~ ^[Yy]$ ]]; then
+        # Check for SSH key
+        if [ ! -f "$HOME/.ssh/id_ed25519" ] && [ ! -f "$HOME/.ssh/id_rsa" ]; then
+            warning "No SSH key found. You might need to create one for GitHub access."
+            read -p "Do you want to create an SSH key now? (y/n): " create_key
+            
+            if [[ "$create_key" =~ ^[Yy]$ ]]; then
+                read -p "Enter your email for the SSH key: " key_email
+                ssh-keygen -t ed25519 -C "$key_email"
+                
+                if [ $? -eq 0 ]; then
+                    success "SSH key created successfully"
+                    echo "You'll need to add this key to your GitHub account:"
+                    cat "$HOME/.ssh/id_ed25519.pub"
+                    echo ""
+                    read -p "Press Enter when you've added the key to GitHub..."
+                else
+                    error "Failed to create SSH key"
+                    read -p "Press Enter to continue anyway..."
+                fi
+            fi
+        fi
+        
+        bash "$SCRIPTS_DIR/backup/sync_dotfiles.sh" --setup
+        if [ $? -ne 0 ]; then
+            error "Repository setup failed"
+        fi
+    else
+        info "You can set up the repository later with: $SCRIPTS_DIR/backup/sync_dotfiles.sh --setup"
+    fi
+    
+    # Set up a periodic backup
+    read -p "Do you want to set up a weekly dotfiles backup? (y/n): " setup_cron
+    
+    if [[ "$setup_cron" =~ ^[Yy]$ ]]; then
+        # Check if crontab is installed
+        if command -v crontab &> /dev/null; then
+            # Add cron job for weekly backup
+            (crontab -l 2>/dev/null || echo "") | grep -v "sync_dotfiles.sh" | { cat; echo "0 0 * * 0 $SCRIPTS_DIR/backup/sync_dotfiles.sh --backup > $SCRIPTS_DIR/logs/dotfiles_sync_cron.log 2>&1"; } | crontab -
+            
+            if [ $? -eq 0 ]; then
+                success "Weekly backup scheduled via crontab"
+            else
+                error "Failed to schedule backup via crontab"
+            fi
+        else
+            warning "crontab not found. You'll need to schedule backups manually."
+        fi
+    fi
+    
+    success "Dotfiles Syncer setup complete"
+    
+    read -p "Press Enter to return to the main menu..."
+    show_menu
+}
+
+# ======= 7. System Backup Script =======
+create_backup_scripts() {
+    info "Creating System Backup scripts..."
+    
+    mkdir -p "$SCRIPTS_DIR/backup"
+    
+    cat > "$SCRIPTS_DIR/backup/backup_projects.sh" << 'EOL'
 #!/bin/bash
 # System Backup Script - Comprehensive backup solution
 
@@ -2633,2371 +5000,3 @@ cat > "$PROJECT_DIR/notebooks/02_model_development.ipynb" << EOF
     "import pandas as pd\n",
     "import matplotlib.pyplot as plt\n",
     "import seaborn as sns\n#!/bin/bash
-# ========================================================================
-#  MASTER SETUP SCRIPT - Complete Development Environment for CS/AI/Web
-#  Author: Guru
-#  Created: April 9, 2025
-#  Updated: April 9, 2025 - Fixed various issues and improved error handling
-# ========================================================================
-
-# Set strict error handling
-set -e
-
-# ======= Configuration (Edit these variables) =======
-DEFAULT_USERNAME="Timeless4k"
-DEFAULT_EMAIL="guru12.it@gmail.com"
-DEFAULT_GITHUB_USERNAME="Timeless4k"
-
-# Paths
-HOME_DIR="$HOME"
-SCRIPTS_DIR="$HOME_DIR/scripts"
-CONFIG_DIR="$SCRIPTS_DIR/config"
-PROJECTS_DIR="$HOME_DIR/Projects"
-DEFAULT_BACKUP_DIR="/mnt/g/My Drive/Backups"
-
-# Project folders to create
-PROJECTS=("vynlox-ai" "vynlox-marketing" "vynlox-docs" "web-projects" "experiments" "notebooks")
-
-# Web browser settings
-DEFAULT_BROWSER="brave"  # Options: brave, chrome, firefox
-DEFAULT_SEARCH="google"  # Options: google, duckduckgo, brave
-
-# Backup settings
-BACKUP_RETENTION_DAYS=30
-BACKUP_ENCRYPT=true
-
-# ======= Script Setup =======
-SCRIPT_NAME=$(basename "$0")
-LOG_FILE="$SCRIPTS_DIR/logs/setup_$(date +%Y-%m-%d_%H-%M-%S).log"
-
-# Detect platform - WSL, Linux, or macOS
-detect_platform() {
-    if grep -q Microsoft /proc/version 2>/dev/null; then
-        echo "wsl"
-    elif [[ "$(uname)" == "Darwin" ]]; then
-        echo "macos"
-    else
-        echo "linux"
-    fi
-}
-
-PLATFORM=$(detect_platform)
-
-# Create necessary directories
-mkdir -p "$SCRIPTS_DIR/logs"
-mkdir -p "$CONFIG_DIR"
-touch "$LOG_FILE"
-
-# ======= Helper Functions =======
-log() {
-    local message="$1"
-    local level="${2:-INFO}"
-    echo -e "[$(date +"%Y-%m-%d %H:%M:%S")] [$level] $message" | tee -a "$LOG_FILE"
-}
-
-success() {
-    log "$1" "SUCCESS"
-    echo -e "\e[32m✅ $1\e[0m"
-}
-
-info() {
-    log "$1" "INFO"
-    echo -e "\e[34mℹ️ $1\e[0m"
-}
-
-warning() {
-    log "$1" "WARNING"
-    echo -e "\e[33m⚠️ $1\e[0m"
-}
-
-error() {
-    log "$1" "ERROR"
-    echo -e "\e[31m❌ $1\e[0m"
-}
-
-check_success() {
-    if [ $? -eq 0 ]; then
-        success "$1"
-        return 0
-    else
-        error "$1 failed"
-        return 1
-    fi
-}
-
-install_if_missing() {
-    if ! command -v $1 &> /dev/null; then
-        info "Installing $1..."
-        sudo apt install -y $1
-        if ! check_success "$1 installation"; then
-            warning "Failed to install $1. You may need to install it manually."
-            return 1
-        fi
-        return 0
-    else
-        info "$1 already installed"
-        return 0
-    fi
-}
-
-# Retry a command up to a specific number of times until it succeeds
-retry() {
-    local retries=$1
-    shift
-    local count=0
-    until "$@"; do
-        exit=$?
-        count=$((count + 1))
-        if [ $count -lt $retries ]; then
-            warning "Command failed. Attempt $count/$retries. Retrying in 5 seconds..."
-            sleep 5
-        else
-            error "The command has failed after $retries attempts."
-            return $exit
-        fi
-    done
-    return 0
-}
-
-# Function to convert Windows path to WSL path
-convert_windows_to_wsl_path() {
-    local win_path="$1"
-    
-    # Replace backslashes with forward slashes
-    win_path="${win_path//\\//}"
-    
-    # Extract drive letter and convert to lowercase
-    local drive_letter="${win_path:0:1}"
-    drive_letter=$(echo "$drive_letter" | tr '[:upper:]' '[:lower:]')
-    
-    # Remove the drive letter and colon
-    local path_without_drive="${win_path:2}"
-    
-    # Construct WSL path
-    echo "/mnt/$drive_letter$path_without_drive"
-}
-
-# Get Google Drive path in WSL format
-get_google_drive_path() {
-    local default_path="G:\\My Drive\\Backups"
-    
-    if [ "$PLATFORM" == "wsl" ]; then
-        read -p "Enter your Google Drive path in Windows format (e.g., G:\\My Drive\\Backups): " win_path
-        win_path=${win_path:-$default_path}
-        
-        # Convert Windows path to WSL path
-        local wsl_path=$(convert_windows_to_wsl_path "$win_path")
-        echo "$wsl_path"
-    else
-        # For Linux/macOS, ask for direct path
-        read -p "Enter your backup path: " backup_path
-        echo "${backup_path:-$HOME/Backups}"
-    fi
-}
-
-# Function to check for network availability
-check_network() {
-    if ping -c 1 google.com &> /dev/null; then
-        return 0
-    else
-        error "Network connectivity issue. Please check your internet connection."
-        return 1
-    fi
-}
-
-# ======= Main Menu Function =======
-show_menu() {
-    clear
-    echo -e "\e[1;36m========================================\e[0m"
-    echo -e "\e[1;36m    🚀 DEVELOPMENT ENVIRONMENT SETUP    \e[0m"
-    echo -e "\e[1;36m========================================\e[0m"
-    echo -e "\e[1;33m1. 💻 Full Development Environment Setup\e[0m"
-    echo -e "\e[1;33m2. 🌐 Browser & Privacy Optimizer\e[0m"
-    echo -e "\e[1;33m3. 🧠 Create AI Modeling Workspace\e[0m"
-    echo -e "\e[1;33m4. 🪄 Clean Slate Windows Configuration\e[0m"
-    echo -e "\e[1;33m5. 🗂️ Setup Downloads Organizer\e[0m"
-    echo -e "\e[1;33m6. 🧱 Setup Dotfiles Syncer\e[0m"
-    echo -e "\e[1;33m7. 📦 Create System Backup\e[0m"
-    echo -e "\e[1;33m8. 📋 Setup Academic Project Tracker\e[0m"
-    echo -e "\e[1;33m9. ⚙️ Configure All Tools\e[0m"
-    echo -e "\e[1;33m0. ❌ Exit\e[0m"
-    echo -e "\e[1;36m========================================\e[0m"
-    echo -ne "\e[1;32mEnter your choice [0-9]: \e[0m"
-    read choice
-
-    case $choice in
-        1) 
-            if setup_dev_environment; then
-                success "Development environment setup completed"
-            else
-                error "Development environment setup had errors"
-            fi
-            ;;
-        2) setup_browser_privacy ;;
-        3) create_ai_workspace ;;
-        4) 
-            if [ "$PLATFORM" != "wsl" ]; then
-                warning "Clean Slate Configuration is designed for Windows with WSL. Your platform is $PLATFORM."
-                read -p "Do you still want to continue? (y/n): " continue_anyway
-                if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
-                    show_menu
-                    return
-                fi
-            fi
-            clean_slate_config 
-            ;;
-        5) setup_downloads_organizer ;;
-        6) setup_dotfiles_syncer ;;
-        7) create_system_backup ;;
-        8) setup_academic_tracker ;;
-        9) configure_all_tools ;;
-        0) exit 0 ;;
-        *) warning "Invalid option. Please try again."; show_menu ;;
-    esac
-}
-
-# ======= 1. Development Environment Setup =======
-setup_dev_environment() {
-    info "Starting development environment setup..."
-    
-    # Create scripts directory structure
-    mkdir -p "$SCRIPTS_DIR"/{backup,productivity,academic,utils,config,logs}
-    
-    # Check for network connectivity
-    if ! check_network; then
-        error "Network connectivity is required for development environment setup."
-        return 1
-    fi
-    
-    # Update and upgrade
-    info "Updating system packages..."
-    if ! sudo apt update; then
-        error "Failed to update package lists. Check your network connection and try again."
-        return 1
-    fi
-    
-    # Only continue with upgrade if update succeeded
-    if ! sudo apt upgrade -y; then
-        warning "Package upgrade had issues. Continuing with installation but some packages might not be the latest version."
-    else
-        success "System update completed"
-    fi
-    
-    # Install essential tools
-    info "Installing essential tools..."
-    ESSENTIALS="build-essential curl wget git zsh tmux unzip zip \
-        software-properties-common gcc g++ make cmake libssl-dev libffi-dev \
-        python3-dev python3-pip python3-venv fonts-powerline gnupg ca-certificates \
-        lsb-release htop neofetch tree ripgrep fd-find jq fzf bat"
-    
-    if ! sudo apt install -y $ESSENTIALS; then
-        error "Failed to install essential tools."
-        warning "Continuing with setup, but you may need to install failed packages manually."
-    else
-        success "Essential tools installation completed"
-    fi
-    
-    # Git configuration
-    info "Setting up Git global config..."
-    # Prompt for Git config if not already configured
-    if ! git config --global user.name >/dev/null 2>&1; then
-        read -p "Enter your name for Git configuration [$DEFAULT_USERNAME]: " git_username
-        git_username=${git_username:-$DEFAULT_USERNAME}
-        git config --global user.name "$git_username"
-    fi
-    
-    if ! git config --global user.email >/dev/null 2>&1; then
-        read -p "Enter your email for Git configuration [$DEFAULT_EMAIL]: " git_email
-        git_email=${git_email:-$DEFAULT_EMAIL}
-        git config --global user.email "$git_email"
-    fi
-    
-    git config --global core.editor "code --wait"
-    git config --global core.autocrlf input
-    git config --global pull.rebase false
-    git config --global init.defaultBranch main
-    success "Git configuration completed"
-    
-    # Install Oh My Zsh
-    if [ ! -d "$HOME_DIR/.oh-my-zsh" ]; then
-        info "Installing Oh My Zsh..."
-        if ! retry 3 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended; then
-            error "Failed to install Oh My Zsh"
-            warning "Continuing setup, but shell customizations may be incomplete"
-        else
-            success "Oh My Zsh installation completed"
-        fi
-    else
-        info "Oh My Zsh already installed"
-    fi
-    
-    # Zsh plugins
-    info "Installing Zsh plugins..."
-    ZSH_CUSTOM="$HOME_DIR/.oh-my-zsh/custom"
-    
-    # Create plugins directory if it doesn't exist
-    mkdir -p "$ZSH_CUSTOM/plugins"
-    
-    # Function to clone or update a plugin
-    install_zsh_plugin() {
-        local repo="$1"
-        local dest="$2"
-        
-        if [ ! -d "$dest" ]; then
-            info "Installing plugin from $repo..."
-            retry 3 git clone --depth=1 "https://github.com/$repo" "$dest"
-            if [ $? -ne 0 ]; then
-                warning "Failed to clone $repo. Skipping."
-                return 1
-            fi
-        else
-            info "Updating plugin at $dest..."
-            (cd "$dest" && git pull)
-        fi
-        return 0
-    }
-    
-    install_zsh_plugin "zsh-users/zsh-autosuggestions" "${ZSH_CUSTOM}/plugins/zsh-autosuggestions"
-    install_zsh_plugin "zsh-users/zsh-syntax-highlighting" "${ZSH_CUSTOM}/plugins/zsh-syntax-highlighting"
-    install_zsh_plugin "zsh-users/zsh-completions" "${ZSH_CUSTOM}/plugins/zsh-completions"
-    install_zsh_plugin "romkatv/powerlevel10k" "${ZSH_CUSTOM}/themes/powerlevel10k"
-    
-    # Update .zshrc with plugins and theme
-    if [ -f "$HOME_DIR/.zshrc" ]; then
-        # Backup existing .zshrc
-        cp "$HOME_DIR/.zshrc" "$HOME_DIR/.zshrc.backup.$(date +%Y%m%d%H%M%S)"
-        
-        # Update theme if default is set
-        if grep -q 'ZSH_THEME="robbyrussell"' "$HOME_DIR/.zshrc"; then
-            sed -i 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME_DIR/.zshrc"
-        fi
-        
-        # Update plugins if default is set
-        if grep -q 'plugins=(git)' "$HOME_DIR/.zshrc"; then
-            sed -i 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-completions docker docker-compose python pip npm node nvm)/' "$HOME_DIR/.zshrc"
-        fi
-        
-        # Add source to bash_aliases if not already present
-        if ! grep -q 'source ~/.bash_aliases' "$HOME_DIR/.zshrc"; then
-            echo 'source ~/.bash_aliases' >> "$HOME_DIR/.zshrc"
-        fi
-        
-        success "Zsh configuration updated"
-    else
-        warning ".zshrc not found, skipping Zsh configuration"
-    fi
-    
-    # Change default shell to Zsh if it's available
-    if command -v zsh &> /dev/null; then
-        if [ "$SHELL" != "$(which zsh)" ]; then
-            info "Changing default shell to Zsh..."
-            chsh -s $(which zsh)
-            if [ $? -ne 0 ]; then
-                warning "Failed to change default shell. You can do this manually with: chsh -s $(which zsh)"
-            else
-                success "Default shell changed to Zsh"
-            fi
-        else
-            info "Zsh is already the default shell"
-        fi
-    else
-        warning "Zsh is not installed. Skipping shell change."
-    fi
-    
-    # Node.js (via NVM)
-    info "Installing Node.js LTS with NVM..."
-    if [ ! -d "$HOME_DIR/.nvm" ]; then
-        retry 3 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-        if [ $? -ne 0 ]; then
-            error "Failed to install NVM"
-            warning "Continuing setup, but Node.js functionality will be limited"
-        else
-            export NVM_DIR="$HOME_DIR/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-            
-            # Check if nvm command is available
-            if command -v nvm &> /dev/null; then
-                retry 3 nvm install --lts
-                if [ $? -ne 0 ]; then
-                    warning "Failed to install Node.js LTS"
-                else
-                    nvm use --lts
-                    success "NVM and Node.js LTS installed and configured"
-                fi
-            else
-                warning "NVM installation succeeded but command not found. You may need to restart your terminal."
-            fi
-        fi
-    else
-        info "NVM already installed, updating..."
-        export NVM_DIR="$HOME_DIR/.nvm"
-        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-        
-        if command -v nvm &> /dev/null; then
-            retry 3 nvm install --lts
-            if [ $? -ne 0 ]; then
-                warning "Failed to update Node.js LTS"
-            else
-                nvm use --lts
-                success "Node.js updated to latest LTS version"
-            fi
-        else
-            warning "NVM installation exists but command not found. Try restarting your terminal."
-        fi
-    fi
-    
-    # Global NPM packages - only if Node.js was successfully installed
-    if command -v node &> /dev/null && command -v npm &> /dev/null; then
-        info "Installing global NPM packages..."
-        
-        NPM_PACKAGES=(
-            "pnpm"
-            "vercel"
-            "supabase"
-            "create-t3-app"
-            "eslint"
-            "prettier"
-            "typescript"
-            "ts-node"
-            "@nestjs/cli" 
-            "next"
-            "create-react-app"
-            "netlify-cli"
-            "npm-check-updates"
-        )
-        
-        for package in "${NPM_PACKAGES[@]}"; do
-            info "Installing $package..."
-            retry 3 npm install -g $package
-            if [ $? -ne 0 ]; then
-                warning "Failed to install $package"
-            fi
-        done
-        
-        success "Global NPM packages installation completed"
-    else
-        warning "Node.js or npm not found, skipping global NPM packages installation"
-    fi
-    
-    # Python setup
-    info "Setting up Python environment..."
-    if command -v pip &> /dev/null || command -v pip3 &> /dev/null; then
-        # Determine which pip command to use
-        PIP_CMD="pip"
-        if ! command -v pip &> /dev/null && command -v pip3 &> /dev/null; then
-            PIP_CMD="pip3"
-        fi
-        
-        retry 3 $PIP_CMD install --user --upgrade pip
-        if [ $? -ne 0 ]; then
-            warning "Failed to upgrade pip"
-        fi
-        
-        # Basic Python tools
-        PYTHON_BASIC=(
-            "virtualenv"
-            "pipenv"
-            "poetry"
-        )
-        
-        for package in "${PYTHON_BASIC[@]}"; do
-            info "Installing $package..."
-            retry 3 $PIP_CMD install --user $package
-            if [ $? -ne 0 ]; then
-                warning "Failed to install $package"
-            fi
-        done
-        
-        # Python data science & ML packages
-        info "Installing Python data science & ML packages..."
-        
-        # Core data science
-        PYTHON_DATA=(
-            "numpy"
-            "pandas"
-            "scikit-learn"
-            "matplotlib"
-            "seaborn"
-            "plotly"
-            "jupyterlab"
-            "notebook"
-            "ipywidgets"
-        )
-        
-        for package in "${PYTHON_DATA[@]}"; do
-            info "Installing $package..."
-            retry 3 $PIP_CMD install --user $package
-            if [ $? -ne 0 ]; then
-                warning "Failed to install $package"
-            fi
-        done
-        
-        # ML frameworks - these can be large/complex so we'll handle errors more gracefully
-        info "Installing machine learning frameworks..."
-        retry 3 $PIP_CMD install --user tensorflow keras
-        if [ $? -ne 0 ]; then
-            warning "Failed to install TensorFlow. You may need to install it manually with specific options for your system."
-        fi
-        
-        retry 3 $PIP_CMD install --user torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-        if [ $? -ne 0 ]; then
-            warning "Failed to install PyTorch. You may need to install it manually with specific options for your system."
-            warning "Try: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
-        fi
-        
-        # ML tools
-        PYTHON_ML_TOOLS=(
-            "xgboost"
-            "lightgbm"
-            "catboost"
-            "transformers"
-            "datasets"
-            "accelerate"
-            "huggingface_hub"
-            "fastapi"
-            "uvicorn"
-            "pydantic"
-        )
-        
-        for package in "${PYTHON_ML_TOOLS[@]}"; do
-            info "Installing $package..."
-            retry 3 $PIP_CMD install --user $package
-            if [ $? -ne 0 ]; then
-                warning "Failed to install $package"
-            fi
-        done
-        
-        # IDE tools
-        PYTHON_IDE=(
-            "jupyterlab-vim"
-            "jupyterlab-lsp"
-            "python-lsp-server[all]"
-            "black"
-            "flake8"
-            "mypy"
-            "pytest"
-        )
-        
-        for package in "${PYTHON_IDE[@]}"; do
-            info "Installing $package..."
-            retry 3 $PIP_CMD install --user "$package"
-            if [ $? -ne 0 ]; then
-                warning "Failed to install $package"
-            fi
-        done
-        
-        success "Python packages installation completed"
-    else
-        error "Python pip not found. Skipping Python packages installation."
-    fi
-    
-    # Databases
-    info "Installing database tools..."
-    if command -v apt &> /dev/null; then
-        DB_PACKAGES=(
-            "postgresql"
-            "postgresql-contrib"
-            "sqlite3"
-            "redis-server"
-        )
-        
-        for package in "${DB_PACKAGES[@]}"; do
-            info "Installing $package..."
-            if ! sudo apt install -y $package; then
-                warning "Failed to install $package"
-            fi
-        done
-        
-        # Start and enable PostgreSQL if installed
-        if command -v pg_ctl &> /dev/null || command -v postgres &> /dev/null; then
-            if command -v systemctl &> /dev/null; then
-                sudo systemctl enable postgresql
-                sudo systemctl start postgresql
-                success "PostgreSQL enabled and started"
-            else
-                warning "systemctl not found. You may need to start PostgreSQL manually."
-            fi
-        fi
-        
-        # MongoDB - with careful error handling
-        info "Installing MongoDB..."
-        if ! command -v mongod &> /dev/null; then
-            # Only attempt installation if not already installed
-            if command -v wget &> /dev/null; then
-                retry 3 wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
-                
-                if [ $? -eq 0 ]; then
-                    # Get distribution codename
-                    if command -v lsb_release &> /dev/null; then
-                        DISTRO=$(lsb_release -cs)
-                        echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu $DISTRO/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
-                        
-                        sudo apt update
-                        if ! sudo apt install -y mongodb-org; then
-                            warning "Failed to install MongoDB"
-                        else
-                            if command -v systemctl &> /dev/null; then
-                                sudo systemctl enable mongod
-                                sudo systemctl start mongod
-                                success "MongoDB installed, enabled, and started"
-                            else
-                                warning "systemctl not found. MongoDB installed but not started."
-                            fi
-                        fi
-                    else
-                        warning "lsb_release not found. Skipping MongoDB installation."
-                    fi
-                else
-                    warning "Failed to add MongoDB repository key. Skipping MongoDB installation."
-                fi
-            else
-                warning "wget not found. Skipping MongoDB installation."
-            fi
-        else
-            info "MongoDB already installed"
-            
-            # Ensure MongoDB is running
-            if command -v systemctl &> /dev/null; then
-                if ! systemctl is-active --quiet mongod; then
-                    sudo systemctl start mongod
-                    success "MongoDB started"
-                fi
-                
-                if ! systemctl is-enabled --quiet mongod; then
-                    sudo systemctl enable mongod
-                    success "MongoDB enabled to start on boot"
-                fi
-            fi
-        fi
-    else
-        warning "apt not found. Skipping database installations."
-    fi
-    
-    # Docker & Docker Compose
-    info "Installing Docker & Docker Compose..."
-    if ! command -v docker &> /dev/null; then
-        if command -v curl &> /dev/null; then
-            retry 3 curl -fsSL https://get.docker.com -o get-docker.sh
-            
-            if [ -f get-docker.sh ]; then
-                if ! sudo sh get-docker.sh; then
-                    error "Docker installation script failed"
-                else
-                    sudo usermod -aG docker $USER
-                    if command -v systemctl &> /dev/null; then
-                        sudo systemctl enable docker
-                        sudo systemctl start docker
-                        success "Docker installed, enabled, and started"
-                    else
-                        warning "systemctl not found. Docker installed but not started."
-                    fi
-                fi
-                
-                # Clean up
-                rm -f get-docker.sh
-            else
-                error "Failed to download Docker installation script"
-            fi
-        else
-            warning "curl not found. Skipping Docker installation."
-        fi
-    else
-        info "Docker already installed"
-    fi
-    
-    # Kubernetes tools
-    info "Installing Kubernetes tools..."
-    if ! command -v kubectl &> /dev/null; then
-        if command -v curl &> /dev/null; then
-            # Get latest stable kubectl version
-            retry 3 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            
-            if [ -f kubectl ]; then
-                sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-                rm -f kubectl
-                success "kubectl installed"
-            else
-                warning "Failed to download kubectl"
-            fi
-        else
-            warning "curl not found. Skipping kubectl installation."
-        fi
-    else
-        info "kubectl already installed"
-    fi
-    
-    if ! command -v minikube &> /dev/null; then
-        if command -v curl &> /dev/null; then
-            # Install minikube
-            retry 3 curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-            
-            if [ -f minikube-linux-amd64 ]; then
-                sudo install minikube-linux-amd64 /usr/local/bin/minikube
-                rm -f minikube-linux-amd64
-                success "minikube installed"
-            else
-                warning "Failed to download minikube"
-            fi
-        else
-            warning "curl not found. Skipping minikube installation."
-        fi
-    else
-        info "minikube already installed"
-    fi
-    
-    # Cloud CLIs
-    info "Installing Cloud CLI tools..."
-    
-    # AWS CLI
-    if ! command -v aws &> /dev/null; then
-        if command -v curl &> /dev/null && command -v unzip &> /dev/null; then
-            info "Installing AWS CLI..."
-            retry 3 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            
-            if [ -f awscliv2.zip ]; then
-                unzip -q awscliv2.zip
-                if [ -d aws ]; then
-                    sudo ./aws/install
-                    rm -rf aws awscliv2.zip
-                    success "AWS CLI installed"
-                else
-                    warning "AWS CLI extraction failed"
-                    rm -f awscliv2.zip
-                fi
-            else
-                warning "Failed to download AWS CLI"
-            fi
-        else
-            warning "curl or unzip not found. Skipping AWS CLI installation."
-        fi
-    else
-        info "AWS CLI already installed"
-    fi
-    
-    # Azure CLI
-    if ! command -v az &> /dev/null; then
-        if command -v curl &> /dev/null; then
-            info "Installing Azure CLI..."
-            
-            # This is a complex installation, so we'll capture the output and only show errors
-            if ! curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash; then
-                error "Azure CLI installation failed"
-            else
-                success "Azure CLI installed"
-            fi
-        else
-            warning "curl not found. Skipping Azure CLI installation."
-        fi
-    else
-        info "Azure CLI already installed"
-    fi
-    
-    # Google Cloud SDK
-    if ! command -v gcloud &> /dev/null; then
-        if command -v apt-key &> /dev/null && command -v apt-get &> /dev/null; then
-            info "Installing Google Cloud SDK..."
-            
-            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-            curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
-            
-            if sudo apt-get update && sudo apt-get install -y google-cloud-sdk; then
-                success "Google Cloud SDK installed"
-            else
-                error "Google Cloud SDK installation failed"
-            fi
-        else
-            warning "apt-key or apt-get not found. Skipping Google Cloud SDK installation."
-        fi
-    else
-        info "Google Cloud SDK already installed"
-    fi
-    
-    # VS Code extensions - only if VS Code is installed
-    if command -v code &> /dev/null; then
-        info "Installing VS Code extensions..."
-        EXTENSIONS=(
-            "ms-python.python"
-            "ms-toolsai.jupyter"
-            "ms-toolsai.vscode-jupyter-slideshow"
-            "esbenp.prettier-vscode"
-            "dbaeumer.vscode-eslint"
-            "bradlc.vscode-tailwindcss"
-            "eamodio.gitlens"
-            "visualstudioexptteam.vscodeintellicode"
-            "ms-vsliveshare.vsliveshare"
-            "ms-azuretools.vscode-docker"
-            "ms-vscode-remote.remote-wsl"
-            "github.vscode-pull-request-github"
-            "ms-vscode-remote.remote-containers"
-            "redhat.vscode-yaml"
-            "yzhang.markdown-all-in-one"
-            "streetsidesoftware.code-spell-checker"
-            "davidanson.vscode-markdownlint"
-            "mongodb.mongodb-vscode"
-            "mtxr.
-
-                return 1
-    fi
-    
-    # Get task details
-    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
-    IFS=, read -r name due_date description status <<< "$task_line"
-    
-    # Calculate days until due
-    local days=$(days_until_due "$due_date")
-    
-    # Display task details
-    echo -e "${COLOR_BLUE}=== Task Details ===${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}Name:${COLOR_RESET}        $name"
-    echo -e "${COLOR_CYAN}Due Date:${COLOR_RESET}    $(format_date "$due_date")"
-    echo -e "${COLOR_CYAN}Description:${COLOR_RESET} $description"
-    echo -e "${COLOR_CYAN}Status:${COLOR_RESET}      $([ "$status" = "Completed" ] && echo -e "${COLOR_GREEN}Completed${COLOR_RESET}" || echo -e "${COLOR_YELLOW}Pending${COLOR_RESET}")"
-    
-    # Check if task folder exists
-    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-    if [ -d "$task_dir" ]; then
-        echo -e "${COLOR_CYAN}Folder:${COLOR_RESET}      $task_dir"
-        
-        # Check for files in the task folder
-        file_count=$(find "$task_dir" -type f | wc -l)
-        if [ $file_count -gt 1 ]; then  # More than just README.md
-            echo -e "${COLOR_CYAN}Files:${COLOR_RESET}       $(($file_count - 1)) files in folder (excluding README)"
-            echo ""
-            echo -e "${COLOR_BLUE}Files in task folder:${COLOR_RESET}"
-            find "$task_dir" -type f -not -name "README.md" | while read -r file; do
-                echo -e "- ${COLOR_CYAN}$(basename "$file")${COLOR_RESET} ($(du -h "$file" | cut -f1))"
-            done
-        else
-            echo -e "${COLOR_CYAN}Files:${COLOR_RESET}       No additional files in folder"
-        fi
-    else
-        echo -e "${COLOR_CYAN}Folder:${COLOR_RESET}      Not created yet"
-    fi
-}
-
-# List pending tasks
-list_pending() {
-    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
-        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
-        return
-    fi
-    
-    echo -e "${COLOR_BLUE}Pending Academic Tasks:${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              ${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}------------------------------------------------${COLOR_RESET}"
-    
-    # Skip header line and process each task
-    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
-        if [ "$status" != "Completed" ]; then
-            # Find the line number using pattern matching
-            line_pattern="$name,$due_date,$description,$status"
-            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
-            
-            if [ -z "$line_number" ]; then
-                continue
-            fi
-            
-            # Adjust line number to be zero-based ID
-            line_number=$((line_number - 1))
-            
-            # Format name (truncate if too long)
-            if [ ${#name} -gt 20 ]; then
-                name="${name:0:17}..."
-            fi
-            
-            # Print task
-            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s\n" "$line_number" "$name" "$(format_date "$due_date")"
-        fi
-    done
-}
-
-# List tasks due today
-list_today() {
-    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
-        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
-        return
-    fi
-    
-    echo -e "${COLOR_BLUE}Tasks Due Today:${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}ID  | Name                    | Status     ${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}----------------------------------------${COLOR_RESET}"
-    
-    local today=$(date +%Y-%m-%d)
-    local found=false
-    
-    # Skip header line and process each task
-    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
-        if [ "$due_date" = "$today" ]; then
-            found=true
-            
-            # Find the line number using pattern matching
-            line_pattern="$name,$due_date,$description,$status"
-            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
-            
-            if [ -z "$line_number" ]; then
-                continue
-            fi
-            
-            # Adjust line number to be zero-based ID
-            line_number=$((line_number - 1))
-            
-            # Format name (truncate if too long)
-            if [ ${#name} -gt 20 ]; then
-                name="${name:0:17}..."
-            fi
-            
-            # Format status
-            if [ "$status" = "Completed" ]; then
-                status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
-            else
-                status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
-            fi
-            
-            # Print task
-            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %s\n" "$line_number" "$name" "$status_text"
-        fi
-    done
-    
-    if [ "$found" = false ]; then
-        echo -e "${COLOR_YELLOW}No tasks due today.${COLOR_RESET}"
-    fi
-}
-
-# List tasks due this week
-list_week() {
-    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
-        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
-        return
-    fi
-    
-    echo -e "${COLOR_BLUE}Tasks Due This Week:${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              | Status     ${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}----------------------------------------------------------${COLOR_RESET}"
-    
-    local found=false
-    
-    # Skip header line and process each task
-    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
-        local days=$(days_until_due "$due_date")
-        
-        if [ $days -ge 0 ] && [ $days -lt 7 ]; then
-            found=true
-            
-            # Find the line number using pattern matching
-            line_pattern="$name,$due_date,$description,$status"
-            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
-            
-            if [ -z "$line_number" ]; then
-                continue
-            fi
-            
-            # Adjust line number to be zero-based ID
-            line_number=$((line_number - 1))
-            
-            # Format name (truncate if too long)
-            if [ ${#name} -gt 20 ]; then
-                name="${name:0:17}..."
-            fi
-            
-            # Format status
-            if [ "$status" = "Completed" ]; then
-                status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
-            else
-                status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
-            fi
-            
-            # Print task
-            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s | %s\n" "$line_number" "$name" "$(format_date "$due_date")" "$status_text"
-        fi
-    done
-    
-    if [ "$found" = false ]; then
-        echo -e "${COLOR_YELLOW}No tasks due this week.${COLOR_RESET}"
-    fi
-}
-
-# Main function to process commands
-main() {
-    if [ $# -eq 0 ]; then
-        show_help
-        return
-    fi
-    
-    case "$1" in
-        list)
-            list_tasks
-            ;;
-        add)
-            add_task
-            ;;
-        complete)
-            complete_task "$2"
-            ;;
-        delete)
-            delete_task "$2"
-            ;;
-        edit)
-            edit_task "$2"
-            ;;
-        view)
-            view_task "$2"
-            ;;
-        pending)
-            list_pending
-            ;;
-        today)
-            list_today
-            ;;
-        week)
-            list_week
-            ;;
-        help)
-            show_help
-            ;;
-        *)
-            echo -e "${COLOR_RED}Unknown command: $1${COLOR_RESET}"
-            show_help
-            ;;
-    esac
-}
-
-# Run main function with all arguments
-main "$@"
-EOL
-
-    chmod +x "$SCRIPTS_DIR/academic/task_manager.sh"
-    
-    # Create an alias for easy access
-    if ! grep -q "alias task=" "$HOME/.bash_aliases" 2>/dev/null; then
-        echo 'alias task="$HOME/scripts/academic/task_manager.sh"' >> "$HOME/.bash_aliases"
-    fi
-    
-    return 0
-}
-
-setup_academic_tracker() {
-    info "Setting up Academic Project Tracker..."
-    
-    # Create the script if it doesn't exist
-    if [ ! -f "$SCRIPTS_DIR/academic/task_manager.sh" ]; then
-        create_academic_tracker_script
-    fi
-    
-    # Create an example task to show how it works
-    if [ ! -s "$SCRIPTS_DIR/academic/tasks.csv" ] || [ $(wc -l < "$SCRIPTS_DIR/academic/tasks.csv") -le 1 ]; then
-        echo "Name,Due Date,Description,Status" > "$SCRIPTS_DIR/academic/tasks.csv"
-        
-        # Calculate a due date one week from now using platform-specific date commands
-        if [ "$PLATFORM" == "macos" ]; then
-            # macOS date command
-            due_date=$(date -v+7d +%Y-%m-%d)
-        else
-            # Linux date command
-            due_date=$(date -d "+7 days" +%Y-%m-%d)
-        fi
-        
-        echo "Example Assignment,$due_date,This is an example assignment to demonstrate the task tracker.,Pending" >> "$SCRIPTS_DIR/academic/tasks.csv"
-        
-        # Create example folder
-        mkdir -p "$HOME/Uni/Example_Assignment"
-        
-        # Create README
-        cat > "$HOME/Uni/Example_Assignment/README.md" << EOF
-# Example Assignment
-
-**Due Date:** $due_date
-**Status:** Pending
-
-## Description
-This is an example assignment to demonstrate the task tracker.
-
-## Notes
-- This is just an example
-- You can add your own notes here
-
-## Resources
-- Course website: https://example.edu/course
-- Lecture notes: Week 3
-EOF
-
-        success "Example task created"
-    fi
-    
-    # Demonstrate the tool
-    echo ""
-    echo "===== Academic Project Tracker Demo ====="
-    bash "$SCRIPTS_DIR/academic/task_manager.sh" list
-    echo ""
-    echo "Available commands:"
-    echo "  task list              - List all tasks"
-    echo "  task add               - Add a new task"
-    echo "  task complete <id>     - Mark a task as complete"
-    echo "  task edit <id>         - Edit a task"
-    echo "  task view <id>         - View task details"
-    echo "  task week              - See tasks due this week"
-    echo ""
-    echo "Tasks are stored in: $SCRIPTS_DIR/academic/tasks.csv"
-    echo "Project folders are created in: $HOME/Uni/"
-    echo ""
-    
-    success "Academic Project Tracker setup complete"
-    
-    read -p "Press Enter to return to the main menu..."
-    show_menu
-}
-
-# ======= 9. Configure All Tools =======
-configure_all_tools() {
-    info "Configuring all tools..."
-    
-    # User information
-    read -p "Enter your full name for configuration [$DEFAULT_USERNAME]: " full_name
-    full_name=${full_name:-$DEFAULT_USERNAME}
-    
-    read -p "Enter your email for configuration [$DEFAULT_EMAIL]: " email
-    email=${email:-$DEFAULT_EMAIL}
-    
-    read -p "Enter your GitHub username [$DEFAULT_GITHUB_USERNAME]: " github_username
-    github_username=${github_username:-$DEFAULT_GITHUB_USERNAME}
-    
-    # Get Google Drive path for backups
-    backup_path=$(get_google_drive_path)
-    
-    # Update config files
-    if [ -f "$SCRIPTS_DIR/config/backup.conf" ]; then
-        # Use different sed syntax based on platform
-        if [ "$(uname)" == "Darwin" ]; then
-            # macOS sed
-            sed -i '' "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
-        else
-            # Linux sed
-            sed -i "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
-        fi
-        
-        success "Backup path set to $backup_path"
-    fi
-    
-    # Set up Git config
-    if [ -n "$full_name" ]; then
-        git config --global user.name "$full_name"
-        success "Git username set to: $full_name"
-    fi
-    
-    if [ -n "$email" ]; then
-        git config --global user.email "$email"
-        success "Git email set to: $email"
-    fi
-    
-    # Set up Zsh theme if zsh is installed
-    if [ -f "$HOME/.zshrc" ]; then
-        if grep -q "ZSH_THEME=\"robbyrussell\"" "$HOME/.zshrc"; then
-            if [ "$(uname)" == "Darwin" ]; then
-                # macOS sed
-                sed -i '' 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
-            else
-                # Linux sed
-                sed -i 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
-            fi
-            success "Zsh theme set to Powerlevel10k"
-        fi
-    fi
-    
-    # Configure VS Code settings if present
-    vs_code_dir=""
-    if [ -d "$HOME/.config/Code/User" ]; then
-        vs_code_dir="$HOME/.config/Code/User"
-    elif [ "$PLATFORM" == "wsl" ]; then
-        # Try to detect VS Code settings in Windows
-        WIN_USER=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r')
-        if [ -n "$WIN_USER" ] && [[ ! "$WIN_USER" == *"%" ]]; then
-            POTENTIAL_VSCODE_DIR="/mnt/c/Users/$WIN_USER/AppData/Roaming/Code/User"
-            if [ -d "$POTENTIAL_VSCODE_DIR" ]; then
-                vs_code_dir="$POTENTIAL_VSCODE_DIR"
-            fi
-        fi
-    fi
-    
-    if [ -n "$vs_code_dir" ]; then
-        mkdir -p "$vs_code_dir"
-        
-        # Create settings.json
-        cat > "$vs_code_dir/settings.json" << EOF
-{
-    "editor.fontFamily": "JetBrains Mono, Consolas, 'Courier New', monospace",
-    "editor.fontSize": 14,
-    "editor.lineHeight": 22,
-    "editor.fontWeight": "400",
-    "editor.tabSize": 2,
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
-    "editor.codeActionsOnSave": {
-        "source.fixAll.eslint": true
-    },
-    "editor.bracketPairColorization.enabled": true,
-    "editor.guides.bracketPairs": true,
-    "editor.minimap.enabled": false,
-    "editor.rulers": [80, 100],
-    "editor.wordWrap": "on",
-    "explorer.confirmDelete": false,
-    "explorer.confirmDragAndDrop": false,
-    "files.associations": {
-        "*.css": "css"
-    },
-    "files.trimTrailingWhitespace": true,
-    "files.insertFinalNewline": true,
-    "files.exclude": {
-        "**/.git": true,
-        "**/.DS_Store": true,
-        "**/node_modules": true,
-        "**/__pycache__": true,
-        "**/venv": true,
-        ".pytest_cache": true,
-        ".coverage": true
-    },
-    "terminal.integrated.fontFamily": "JetBrains Mono, Consolas, 'Courier New', monospace",
-    "terminal.integrated.fontSize": 14,
-    "workbench.colorTheme": "One Dark Pro",
-    "workbench.iconTheme": "material-icon-theme",
-    "workbench.editor.enablePreview": false,
-    "workbench.startupEditor": "newUntitledFile",
-    "javascript.updateImportsOnFileMove.enabled": "always",
-    "javascript.format.enable": false,
-    "python.formatting.provider": "black",
-    "python.linting.enabled": true,
-    "python.linting.pylintEnabled": true,
-    "python.linting.flake8Enabled": true,
-    "jupyter.themeMatplotlibPlots": true,
-    "jupyter.askForKernelRestart": false,
-    "[javascript]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.formatOnSave": true
-    },
-    "[typescript]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.formatOnSave": true
-    },
-    "[python]": {
-        "editor.formatOnSave": true,
-        "editor.defaultFormatter": "ms-python.python"
-    },
-    "[json]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode"
-    },
-    "[html]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode"
-    },
-    "[css]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode"
-    }
-}
-EOF
-        
-        success "VS Code settings configured"
-    else
-        warning "VS Code settings directory not found. Skipping VS Code configuration."
-    fi
-    
-    success "All tools configured"
-    
-    read -p "Press Enter to return to the main menu..."
-    show_menu
-}
-
-# ======= Main Script Execution =======
-# Display the main menu to start
-show_menu
-            # Use different sed syntax based on platform (macOS vs Linux)
-            if [ "$(uname)" == "Darwin" ]; then
-                sed -i '' "s/ENCRYPTION_PASSWORD=\"\"/ENCRYPTION_PASSWORD=\"$encryption_password\"/" "$SCRIPTS_DIR/config/backup.conf"
-            else
-                sed -i "s/ENCRYPTION_PASSWORD=\"\"/ENCRYPTION_PASSWORD=\"$encryption_password\"/" "$SCRIPTS_DIR/config/backup.conf"
-            fi
-            
-            success "Encryption enabled and password set"
-            
-            # Security warning
-            warning "Note: Your encryption password is stored in plain text in $SCRIPTS_DIR/config/backup.conf"
-            warning "Consider restricting access to this file: chmod 600 $SCRIPTS_DIR/config/backup.conf"
-            
-            # Set appropriate permissions on the config file
-            chmod 600 "$SCRIPTS_DIR/config/backup.conf"
-        else
-            warning "No password provided, encryption may not work correctly"
-        fi
-    fi
-    
-    # Ask how many days to keep backups
-    read -p "How many days do you want to keep backups? (default: 30): " retention_days
-    
-    if [ -n "$retention_days" ] && [[ "$retention_days" =~ ^[0-9]+$ ]]; then
-        # Use different sed syntax based on platform (macOS vs Linux)
-        if [ "$(uname)" == "Darwin" ]; then
-            sed -i '' "s/RETENTION_DAYS=30/RETENTION_DAYS=$retention_days/" "$SCRIPTS_DIR/config/backup.conf"
-        else
-            sed -i "s/RETENTION_DAYS=30/RETENTION_DAYS=$retention_days/" "$SCRIPTS_DIR/config/backup.conf"
-        fi
-        
-        success "Backup retention set to $retention_days days"
-    fi
-    
-    # Ask if they want to run it now
-    read -p "Do you want to run the backup now? (y/n): " run_now
-    
-    if [[ "$run_now" =~ ^[Yy]$ ]]; then
-        # Source the updated config before running
-        source "$SCRIPTS_DIR/config/backup.conf"
-        
-        # Check access to backup location before running
-        if [ ! -d "$BACKUP_BASE_DIR" ]; then
-            warning "Backup location $BACKUP_BASE_DIR doesn't exist or is not accessible"
-            
-            if [ "$PLATFORM" == "wsl" ]; then
-                # For WSL, provide more specific guidance about Google Drive paths
-                info "The Google Drive path is not accessible from WSL."
-                info "Check that G: drive is properly mounted in Windows"
-                info "Make sure 'G:\\My Drive\\Backups' exists in Windows Explorer"
-                
-                read -p "Try to create the backup directory manually? (y/n): " create_dir
-                
-                if [[ "$create_dir" =~ ^[Yy]$ ]]; then
-                    # Try a more robust directory creation approach
-                    mkdir -p "$BACKUP_BASE_DIR" 2>/dev/null
-                    
-                    if [ ! -d "$BACKUP_BASE_DIR" ]; then
-                        # If that fails, try using cmd.exe as fallback
-                        win_path=$(echo "$BACKUP_BASE_DIR" | sed 's|/mnt/\([a-z]\)|\U\1:|' | sed 's|/|\\|g')
-                        cmd.exe /C "mkdir \"$win_path\"" 2>/dev/null
-                        
-                        # Check again
-                        if [ ! -d "$BACKUP_BASE_DIR" ]; then
-                            error "Could not create backup directory."
-                            info "Please create the following directory manually in Windows:"
-                            info "G:\\My Drive\\Backups"
-                            
-                            read -p "Press Enter to continue..."
-                            return 1
-                        fi
-                    fi
-                else
-                    warning "Backup cannot proceed without a valid backup location"
-                    info "Please create the directory manually and try again"
-                    read -p "Press Enter to continue..."
-                    return 1
-                fi
-            else
-                # For non-WSL platforms
-                read -p "Do you want to create it? (y/n): " create_dir
-                
-                if [[ "$create_dir" =~ ^[Yy]$ ]]; then
-                    mkdir -p "$BACKUP_BASE_DIR"
-                    if [ $? -ne 0 ]; then
-                        error "Failed to create backup directory. Please check your configuration."
-                        info "You may need to create the directory manually or specify a different location."
-                        return 1
-                    fi
-                else
-                    warning "Backup cannot proceed without a valid backup location"
-                    info "Please create the directory manually and try again"
-                    read -p "Press Enter to continue..."
-                    return 1
-                fi
-            fi
-        fi
-        
-        # Run the backup with error handling
-        if ! bash "$SCRIPTS_DIR/backup/backup_projects.sh"; then
-            error "Backup failed. Check logs for details: $SCRIPTS_DIR/logs/"
-        else
-            success "Backup completed successfully"
-        fi
-    fi
-    
-    # Ask if they want to schedule it
-    read -p "Do you want to schedule this to run weekly? (y/n): " schedule_it
-    
-    if [[ "$schedule_it" =~ ^[Yy]$ ]]; then
-        # Create scheduled task script with improved robustness
-        cat > "$SCRIPTS_DIR/backup/setup_backup_task.ps1" << 'EOL'
-# Setup Windows Task Scheduler for Weekly Backup
-# Run this with PowerShell as Administrator
-
-$ErrorActionPreference = "Stop"
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-
-# Check if running as Administrator
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "❌ This script needs to be run as Administrator." -ForegroundColor Red
-    Write-Host "Please right-click the PowerShell icon and select 'Run as administrator', then try again." -ForegroundColor Yellow
-    exit 1
-}
-
-try {
-    $taskName = "WeeklySystemBackup"
-    $taskDescription = "Weekly backup of projects and configuration files"
-    $scriptPath = "$env:USERPROFILE\scripts\backup\backup_projects.bat"
-
-    # Check for WSL paths
-    $wslPath = Get-ChildItem "$env:USERPROFILE\AppData\Local\Packages\*Ubuntu*\LocalState\rootfs\home\*\scripts\backup\backup_projects.bat" -ErrorAction SilentlyContinue
-    
-    if ($wslPath) {
-        Write-Host "Found WSL script at: $($wslPath.FullName)" -ForegroundColor Cyan
-        $scriptPath = $wslPath.FullName
-    }
-    
-    # Verify script exists
-    if (-not (Test-Path $scriptPath)) {
-        Write-Host "❌ Script not found at: $scriptPath" -ForegroundColor Red
-        $manualPath = Read-Host "Enter the full path to backup_projects.bat (or press Enter to cancel)"
-        
-        if ([string]::IsNullOrEmpty($manualPath)) {
-            Write-Host "Task setup cancelled." -ForegroundColor Yellow
-            exit 1
-        }
-        
-        if (-not (Test-Path $manualPath)) {
-            Write-Host "❌ Script still not found. Please verify the path and try again." -ForegroundColor Red
-            exit 1
-        }
-        
-        $scriptPath = $manualPath
-    }
-
-    # Create a new task action
-    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$scriptPath`""
-
-    # Create a trigger to run weekly on Sunday at 2 AM
-    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 2am
-
-    # Register the task with higher privileges
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Description $taskDescription -RunLevel Highest -Force
-
-    Write-Host "✅ Weekly backup scheduled task created successfully!" -ForegroundColor Green
-    Write-Host "⏰ The task will run every Sunday at 2:00 AM" -ForegroundColor Cyan
-}
-catch {
-    Write-Host "❌ Error creating scheduled task: $_" -ForegroundColor Red
-    exit 1
-}
-EOL
-
-        success "PowerShell script for task scheduling created"
-        info "To schedule the task, please run the PowerShell script as administrator:"
-        info "PowerShell.exe -ExecutionPolicy Bypass -File \"$SCRIPTS_DIR/backup/setup_backup_task.ps1\""
-    fi
-    
-    success "System Backup setup complete"
-    
-    # Add a reminder about backup in .zshrc if not already present
-    if [ -f "$HOME/.zshrc" ] && ! grep -q "backup_projects.sh" "$HOME/.zshrc"; then
-        cat >> "$HOME/.zshrc" << 'EOL'
-
-# Backup reminder - check if it's been more than 7 days since last backup
-if [ -f ~/last_backup.txt ]; then
-    last_backup=$(cat ~/last_backup.txt)
-    today=$(date +%Y-%m-%d)
-    
-    # Handle different date commands based on OS
-    if [ "$(uname)" == "Darwin" ]; then
-        # macOS
-        last_backup_seconds=$(date -j -f "%Y-%m-%d" "$last_backup" +%s)
-        today_seconds=$(date -j -f "%Y-%m-%d" "$today" +%s)
-    else
-        # Linux
-        last_backup_seconds=$(date -d "$last_backup" +%s)
-        today_seconds=$(date -d "$today" +%s)
-    fi
-    
-    days_diff=$(( (today_seconds - last_backup_seconds) / 86400 ))
-    
-    if [ $days_diff -gt 7 ]; then
-        echo "⚠️  It's been $days_diff days since your last backup. Consider running: backup"
-    fi
-fi
-EOL
-
-        success "Backup reminder added to .zshrc"
-    fi
-    
-    read -p "Press Enter to return to the main menu..."
-    show_menu
-}
-
-# ======= 8. Academic Project Tracker =======
-create_academic_tracker_script() {
-    info "Creating Academic Project Tracker script..."
-    
-    mkdir -p "$SCRIPTS_DIR/academic"
-    
-    cat > "$SCRIPTS_DIR/academic/task_manager.sh" << 'EOL'
-#!/bin/bash
-# Academic Task Manager
-# Helps track assignments, projects, and deadlines
-
-set -e
-
-# Configuration
-SCRIPT_DIR="$HOME/scripts"
-CONFIG_DIR="$SCRIPT_DIR/config"
-TASKS_FILE="$SCRIPT_DIR/academic/tasks.csv"
-UNI_DIR="$HOME/Uni"
-
-# Function to detect platform - WSL, Linux, or macOS
-detect_platform() {
-    if grep -q Microsoft /proc/version 2>/dev/null; then
-        echo "wsl"
-    elif [[ "$(uname)" == "Darwin" ]]; then
-        echo "macos"
-    else
-        echo "linux"
-    fi
-}
-
-PLATFORM=$(detect_platform)
-
-# Create directories if they don't exist
-mkdir -p "$SCRIPT_DIR/academic"
-mkdir -p "$UNI_DIR"
-
-# Create tasks file if it doesn't exist
-if [ ! -f "$TASKS_FILE" ]; then
-    echo "Name,Due Date,Description,Status" > "$TASKS_FILE"
-fi
-
-# Colorized output
-COLOR_RED='\033[0;31m'
-COLOR_GREEN='\033[0;32m'
-COLOR_YELLOW='\033[0;33m'
-COLOR_BLUE='\033[0;34m'
-COLOR_PURPLE='\033[0;35m'
-COLOR_CYAN='\033[0;36m'
-COLOR_RESET='\033[0m'
-
-# Help function
-show_help() {
-    echo -e "${COLOR_BLUE}Academic Task Manager${COLOR_RESET}"
-    echo -e "${COLOR_GREEN}Usage:${COLOR_RESET} $(basename $0) [command] [options]"
-    echo ""
-    echo -e "${COLOR_YELLOW}Commands:${COLOR_RESET}"
-    echo -e "  ${COLOR_CYAN}list${COLOR_RESET}                   List all tasks"
-    echo -e "  ${COLOR_CYAN}add${COLOR_RESET}                    Add a new task"
-    echo -e "  ${COLOR_CYAN}complete ${COLOR_RED}<id>${COLOR_RESET}           Mark a task as complete"
-    echo -e "  ${COLOR_CYAN}delete ${COLOR_RED}<id>${COLOR_RESET}             Delete a task"
-    echo -e "  ${COLOR_CYAN}edit ${COLOR_RED}<id>${COLOR_RESET}               Edit a task"
-    echo -e "  ${COLOR_CYAN}view ${COLOR_RED}<id>${COLOR_RESET}               View task details"
-    echo -e "  ${COLOR_CYAN}pending${COLOR_RESET}                List pending tasks"
-    echo -e "  ${COLOR_CYAN}today${COLOR_RESET}                  List tasks due today"
-    echo -e "  ${COLOR_CYAN}week${COLOR_RESET}                   List tasks due this week"
-    echo -e "  ${COLOR_CYAN}help${COLOR_RESET}                   Show this help message"
-    echo ""
-    echo -e "${COLOR_YELLOW}Examples:${COLOR_RESET}"
-    echo -e "  $(basename $0) add"
-    echo -e "  $(basename $0) list"
-    echo -e "  $(basename $0) complete 2"
-    echo ""
-}
-
-# Function to validate date format
-validate_date() {
-    local date_str="$1"
-    
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS date validation
-        date -j -f "%Y-%m-%d" "$date_str" >/dev/null 2>&1
-    else
-        # Linux date validation
-        date -d "$date_str" >/dev/null 2>&1
-    fi
-    
-    return $?
-}
-
-# Function to calculate days until due
-days_until_due() {
-    local due_date="$1"
-    local today=$(date +%s)
-    local due
-    
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS
-        due=$(date -j -f "%Y-%m-%d" "$due_date" +%s)
-    else
-        # Linux
-        due=$(date -d "$due_date" +%s)
-    fi
-    
-    echo $(( (due - today) / 86400 ))
-}
-
-# Format date output
-format_date() {
-    local date_str="$1"
-    local days=$(days_until_due "$date_str")
-    local formatted_date
-    
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS
-        formatted_date=$(date -j -f "%Y-%m-%d" "$date_str" "+%Y-%m-%d")
-    else
-        # Linux
-        formatted_date=$(date -d "$date_str" "+%Y-%m-%d")
-    fi
-    
-    if [ $days -lt 0 ]; then
-        echo -e "${COLOR_RED}$formatted_date (${days#-} days overdue)${COLOR_RESET}"
-    elif [ $days -eq 0 ]; then
-        echo -e "${COLOR_RED}$formatted_date (Due today)${COLOR_RESET}"
-    elif [ $days -eq 1 ]; then
-        echo -e "${COLOR_YELLOW}$formatted_date (Due tomorrow)${COLOR_RESET}"
-    elif [ $days -le 7 ]; then
-        echo -e "${COLOR_YELLOW}$formatted_date (Due in $days days)${COLOR_RESET}"
-    else
-        echo -e "${COLOR_GREEN}$formatted_date (Due in $days days)${COLOR_RESET}"
-    fi
-}
-
-# List tasks
-list_tasks() {
-    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
-        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
-        return
-    fi
-    
-    echo -e "${COLOR_BLUE}Academic Tasks:${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              | Status     ${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}----------------------------------------------------------${COLOR_RESET}"
-    
-    # Skip header line and process each task
-    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
-        # Find the line number by pattern matching the entire line
-        # We use pattern matching instead of line counter to handle potential issues with different IFS settings
-        line_pattern="$name,$due_date,$description,$status"
-        line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
-        
-        if [ -z "$line_number" ]; then
-            continue
-        fi
-        
-        # Adjust line number to be zero-based ID
-        line_number=$((line_number - 1))
-        
-        # Format name (truncate if too long)
-        if [ ${#name} -gt 20 ]; then
-            name="${name:0:17}..."
-        fi
-        
-        # Format status
-        if [ "$status" = "Completed" ]; then
-            status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
-        else
-            status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
-        fi
-        
-        # Print task
-        printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s | %s\n" "$line_number" "$name" "$(format_date "$due_date")" "$status_text"
-    done
-}
-
-# Add a new task
-add_task() {
-    echo -e "${COLOR_BLUE}Add a new academic task:${COLOR_RESET}"
-    
-    # Get task details
-    read -p "Task name: " name
-    
-    while true; do
-        read -p "Due date (YYYY-MM-DD): " due_date
-        if validate_date "$due_date"; then
-            break
-        else
-            echo -e "${COLOR_RED}Invalid date format. Please use YYYY-MM-DD.${COLOR_RESET}"
-        fi
-    done
-    
-    read -p "Description: " description
-    
-    # Add task to CSV, escaping any commas in the name or description
-    # Replace any existing commas with semicolons to avoid CSV field issues
-    safe_name="${name//,/;}"
-    safe_description="${description//,/;}"
-    
-    echo "$safe_name,$due_date,$safe_description,Pending" >> "$TASKS_FILE"
-    
-    # Create folder for the task
-    task_dir="$UNI_DIR/$(echo "$safe_name" | tr ' ' '_')"
-    mkdir -p "$task_dir"
-    
-    # Create README for the task
-    cat > "$task_dir/README.md" << EOF
-# $safe_name
-
-**Due Date:** $due_date
-**Status:** Pending
-
-## Description
-$safe_description
-
-## Notes
-- 
-
-## Resources
-- 
-EOF
-    
-    echo -e "${COLOR_GREEN}Task added successfully!${COLOR_RESET}"
-    echo -e "${COLOR_BLUE}Task folder created at: ${COLOR_CYAN}$task_dir${COLOR_RESET}"
-}
-
-# Mark a task as complete
-complete_task() {
-    if [ -z "$1" ]; then
-        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
-        return 1
-    fi
-    
-    local task_id="$1"
-    local line_number=$((task_id + 1))
-    
-    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
-        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
-        return 1
-    fi
-    
-    # Get task details
-    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
-    IFS=, read -r name due_date description status <<< "$task_line"
-    
-    if [ "$status" = "Completed" ]; then
-        echo -e "${COLOR_YELLOW}Task is already marked as completed.${COLOR_RESET}"
-        return 0
-    fi
-    
-    # Update task status using platform-specific sed commands
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS sed
-        sed -i '' "${line_number}s/,Pending\$/,Completed/" "$TASKS_FILE"
-    else
-        # Linux sed
-        sed -i "${line_number}s/,Pending\$/,Completed/" "$TASKS_FILE"
-    fi
-    
-    # Update README in task folder
-    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-    if [ -f "$task_dir/README.md" ]; then
-        if [ "$PLATFORM" == "macos" ]; then
-            # macOS sed
-            sed -i '' "s/\*\*Status:\*\* Pending/\*\*Status:\*\* Completed/" "$task_dir/README.md"
-        else
-            # Linux sed
-            sed -i "s/\*\*Status:\*\* Pending/\*\*Status:\*\* Completed/" "$task_dir/README.md"
-        fi
-    fi
-    
-    echo -e "${COLOR_GREEN}Task marked as completed!${COLOR_RESET}"
-}
-
-# Delete a task
-delete_task() {
-    if [ -z "$1" ]; then
-        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
-        return 1
-    fi
-    
-    local task_id="$1"
-    local line_number=$((task_id + 1))
-    
-    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
-        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
-        return 1
-    fi
-    
-    # Get task details before deleting
-    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
-    IFS=, read -r name due_date description status <<< "$task_line"
-    
-    # Confirm deletion
-    read -p "Are you sure you want to delete task '$name'? (y/n): " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo -e "${COLOR_YELLOW}Task deletion cancelled.${COLOR_RESET}"
-        return 0
-    fi
-    
-    # Delete task from CSV using platform-specific sed commands
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS sed
-        sed -i '' "${line_number}d" "$TASKS_FILE"
-    else
-        # Linux sed
-        sed -i "${line_number}d" "$TASKS_FILE"
-    fi
-    
-    # Ask about task folder
-    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-    if [ -d "$task_dir" ]; then
-        read -p "Do you want to delete the task folder as well? (y/n): " delete_folder
-        if [[ "$delete_folder" =~ ^[Yy]$ ]]; then
-            rm -rf "$task_dir"
-            echo -e "${COLOR_GREEN}Task folder deleted.${COLOR_RESET}"
-        else
-            echo -e "${COLOR_YELLOW}Task folder kept at: ${COLOR_CYAN}$task_dir${COLOR_RESET}"
-        fi
-    fi
-    
-    echo -e "${COLOR_GREEN}Task deleted successfully!${COLOR_RESET}"
-}
-
-# Edit a task
-edit_task() {
-    if [ -z "$1" ]; then
-        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
-        return 1
-    fi
-    
-    local task_id="$1"
-    local line_number=$((task_id + 1))
-    
-    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
-        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
-        return 1
-    fi
-    
-    # Get task details
-    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
-    IFS=, read -r name due_date description status <<< "$task_line"
-    
-    echo -e "${COLOR_BLUE}Editing task:${COLOR_RESET} ${COLOR_CYAN}$name${COLOR_RESET}"
-    echo -e "${COLOR_YELLOW}(Leave field empty to keep current value)${COLOR_RESET}"
-    
-    # Get new values
-    read -p "Task name [$name]: " new_name
-    new_name=${new_name:-$name}
-    
-    while true; do
-        read -p "Due date [$due_date]: " new_due_date
-        new_due_date=${new_due_date:-$due_date}
-        
-        if [ -z "$new_due_date" ] || validate_date "$new_due_date"; then
-            break
-        else
-            echo -e "${COLOR_RED}Invalid date format. Please use YYYY-MM-DD.${COLOR_RESET}"
-        fi
-    done
-    
-    read -p "Description [$description]: " new_description
-    new_description=${new_description:-$description}
-    
-    read -p "Status (Pending/Completed) [$status]: " new_status
-    new_status=${new_status:-$status}
-    
-    # Validate status
-    if [ "$new_status" != "Pending" ] && [ "$new_status" != "Completed" ]; then
-        echo -e "${COLOR_RED}Invalid status. Using '$status'.${COLOR_RESET}"
-        new_status=$status
-    fi
-    
-    # Escape any commas to avoid CSV issues
-    safe_new_name="${new_name//,/;}"
-    safe_new_description="${new_description//,/;}"
-    
-    # Update task in CSV using platform-specific sed commands
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS sed
-        sed -i '' "${line_number}s/.*/$safe_new_name,$new_due_date,$safe_new_description,$new_status/" "$TASKS_FILE"
-    else
-        # Linux sed
-        sed -i "${line_number}s/.*/$safe_new_name,$new_due_date,$safe_new_description,$new_status/" "$TASKS_FILE"
-    fi
-    
-    # Handle task folder if name changed
-    if [ "$name" != "$new_name" ]; then
-        old_task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-        new_task_dir="$UNI_DIR/$(echo "$new_name" | tr ' ' '_')"
-        
-        if [ -d "$old_task_dir" ]; then
-            # Move folder if it exists
-            mv "$old_task_dir" "$new_task_dir"
-            echo -e "${COLOR_BLUE}Task folder renamed to: ${COLOR_CYAN}$new_task_dir${COLOR_RESET}"
-        else
-            # Create new folder
-            mkdir -p "$new_task_dir"
-            echo -e "${COLOR_BLUE}New task folder created at: ${COLOR_CYAN}$new_task_dir${COLOR_RESET}"
-        fi
-        
-        # Update README
-        if [ -f "$new_task_dir/README.md" ]; then
-            # Update README content with platform-specific sed commands
-            if [ "$PLATFORM" == "macos" ]; then
-                # macOS sed
-                sed -i '' "s/^# .*$/# $new_name/" "$new_task_dir/README.md"
-                sed -i '' "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$new_task_dir/README.md" 
-                sed -i '' "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$new_task_dir/README.md"
-            else
-                # Linux sed
-                sed -i "s/^# .*$/# $new_name/" "$new_task_dir/README.md"
-                sed -i "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$new_task_dir/README.md"
-                sed -i "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$new_task_dir/README.md"
-            fi
-            
-            # Update description - this is trickier with sed, so we'll use a temp file
-            awk -v desc="$new_description" '
-            BEGIN{replaced=0}
-            /^## Description/{print; print desc; getline; replaced=1; next}
-            {print}
-            ' "$new_task_dir/README.md" > "$new_task_dir/README.md.tmp" 
-            
-            mv "$new_task_dir/README.md.tmp" "$new_task_dir/README.md"
-        else
-            # Create new README
-            cat > "$new_task_dir/README.md" << EOF
-# $new_name
-
-**Due Date:** $new_due_date
-**Status:** $new_status
-
-## Description
-$new_description
-
-## Notes
-- 
-
-## Resources
-- 
-EOF
-        fi
-    else
-        # Just update README in existing folder
-        task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-        if [ -f "$task_dir/README.md" ]; then
-            if [ "$PLATFORM" == "macos" ]; then
-                # macOS sed
-                sed -i '' "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$task_dir/README.md"
-                sed -i '' "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$task_dir/README.md"
-            else
-                # Linux sed
-                sed -i "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$task_dir/README.md"
-                sed -i "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$task_dir/README.md"
-            fi
-            
-            # Update description
-            awk -v desc="$new_description" '
-            BEGIN{replaced=0}
-            /^## Description/{print; print desc; getline; replaced=1; next}
-            {print}
-            ' "$task_dir/README.md" > "$task_dir/README.md.tmp"
-            
-            mv "$task_dir/README.md.tmp" "$task_dir/README.md"
-        fi
-    fi
-    
-    echo -e "${COLOR_GREEN}Task updated successfully!${COLOR_RESET}"
-}
-
-# View task details
-view_task() {
-    if [ -z "$1" ]; then
-        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
-        return 1
-    fi
-    
-    local task_id="$1"
-    local line_number=$((task_id + 1))
-    
-    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
-        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
-        if [[ "\$PROJECTS_BACKUP" == *.enc ]]; then
-        echo "🔑 Enter decryption password for Projects backup:"
-        read -s password
-        openssl enc -aes-256-cbc -d -in "\$PROJECTS_BACKUP" -out "Projects_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
-        PROJECTS_BACKUP="Projects_${BACKUP_TIMESTAMP}.tar.gz"
-    fi
-    
-    echo "📂 Extracting Projects backup..."
-    mkdir -p "$HOME/Projects"
-    tar -xzf "\$PROJECTS_BACKUP" -C "$HOME"
-    echo "✅ Projects restored to $HOME/Projects"
-fi
-
-# Extract university files
-UNI_BACKUP="\$(ls University_${BACKUP_TIMESTAMP}.tar.gz 2>/dev/null || ls University_${BACKUP_TIMESTAMP}.tar.gz.enc 2>/dev/null)"
-if [ -n "\$UNI_BACKUP" ]; then
-    if [[ "\$UNI_BACKUP" == *.enc ]]; then
-        echo "🔑 Enter decryption password for University backup:"
-        read -s password
-        openssl enc -aes-256-cbc -d -in "\$UNI_BACKUP" -out "University_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
-        UNI_BACKUP="University_${BACKUP_TIMESTAMP}.tar.gz"
-    fi
-    
-    echo "📂 Extracting University backup..."
-    mkdir -p "$HOME/Uni"
-    tar -xzf "\$UNI_BACKUP" -C "$HOME"
-    echo "✅ University files restored to $HOME/Uni"
-fi
-
-# Extract configuration files
-CONFIG_BACKUP="\$(ls configs_${BACKUP_TIMESTAMP}.tar.gz 2>/dev/null || ls configs_${BACKUP_TIMESTAMP}.tar.gz.enc 2>/dev/null)"
-if [ -n "\$CONFIG_BACKUP" ]; then
-    if [[ "\$CONFIG_BACKUP" == *.enc ]]; then
-        echo "🔑 Enter decryption password for configuration files backup:"
-        read -s password
-        openssl enc -aes-256-cbc -d -in "\$CONFIG_BACKUP" -out "configs_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
-        CONFIG_BACKUP="configs_${BACKUP_TIMESTAMP}.tar.gz"
-    fi
-    
-    echo "📂 Extracting configuration files..."
-    mkdir -p "configs_temp"
-    tar -xzf "\$CONFIG_BACKUP" -C "configs_temp"
-    
-    # Backup existing configs before overwriting
-    BACKUP_DIR="\$HOME/.config_backup_$(date +%Y%m%d%H%M%S)"
-    mkdir -p "\$BACKUP_DIR"
-    
-    # Copy each file back to its proper location
-    find "configs_temp/configs" -type f | while read file; do
-        relative_path="\${file#configs_temp/configs/}"
-        target_path="\$HOME/\$relative_path"
-        
-        # Backup existing file if it exists
-        if [ -f "\$target_path" ]; then
-            mkdir -p "\$(dirname "\$BACKUP_DIR/\$relative_path")"
-            cp "\$target_path" "\$BACKUP_DIR/\$relative_path"
-        fi
-        
-        # Create the directory if it doesn't exist
-        mkdir -p "\$(dirname "\$target_path")"
-        
-        # Copy the file
-        cp "\$file" "\$target_path"
-        echo "✅ Restored \$relative_path"
-    done
-    
-    # Clean up
-    rm -rf "configs_temp"
-    echo "✅ Configuration files restored"
-    echo "⚠️ Original configuration files have been backed up to \$BACKUP_DIR"
-fi
-
-echo "✅ Backup restoration completed!"
-EOF
-
-chmod +x "${BACKUP_DIR}/restore_backup.sh"
-log "✅ Created restore script: ${BACKUP_DIR}/restore_backup.sh"
-
-exit 0
-EOL
-
-    chmod +x "$SCRIPTS_DIR/backup/backup_projects.sh"
-    
-    # Create Windows batch file to trigger the script
-    cat > "$SCRIPTS_DIR/backup/backup_projects.bat" << 'EOL'
-@echo off
-:: Run Projects Backup script via WSL
-wsl bash -c "~/scripts/backup/backup_projects.sh"
-EOL
-    
-    # Create configuration file
-    mkdir -p "$SCRIPTS_DIR/config"
-    
-    cat > "$SCRIPTS_DIR/config/backup.conf" << 'EOL'
-# Configuration for System Backup Script
-
-# Backup locations
-BACKUP_BASE_DIR="/mnt/g/My Drive/Backups"
-PROJECTS_DIR="$HOME/Projects"
-UNI_DIR="$HOME/Uni"
-
-# Backup settings
-BACKUP_CONFIG_FILES=true
-BACKUP_ENCRYPTION=false
-ENCRYPTION_PASSWORD=""
-RETENTION_DAYS=30
-EOL
-
-    return 0
-}
-
-create_system_backup() {
-    info "Setting up System Backup..."
-    
-    # Create the scripts if they don't exist
-    if [ ! -f "$SCRIPTS_DIR/backup/backup_projects.sh" ]; then
-        create_backup_scripts
-    fi
-    
-    # Make sure config directory exists
-    mkdir -p "$SCRIPTS_DIR/config"
-    
-    # Create default config if it doesn't exist
-    if [ ! -f "$SCRIPTS_DIR/config/backup.conf" ]; then
-        cat > "$SCRIPTS_DIR/config/backup.conf" << 'EOL'
-# Configuration for System Backup Script
-
-# Backup locations
-BACKUP_BASE_DIR="/mnt/g/My Drive/Backups"
-PROJECTS_DIR="$HOME/Projects"
-UNI_DIR="$HOME/Uni"
-
-# Backup settings
-BACKUP_CONFIG_FILES=true
-BACKUP_ENCRYPTION=false
-ENCRYPTION_PASSWORD=""
-RETENTION_DAYS=30
-EOL
-    fi
-    
-    # Get Google Drive path
-    backup_path=$(get_google_drive_path)
-    
-    if [ -n "$backup_path" ]; then
-        # Use different sed syntax based on platform (macOS vs Linux)
-        if [ "$(uname)" == "Darwin" ]; then
-            sed -i '' "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
-        else
-            sed -i "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
-        fi
-        
-        success "Backup location set to $backup_path"
-        
-        # Create the backup directory structure if it doesn't exist
-        if [ ! -d "$backup_path" ]; then
-            info "Attempting to create backup directory: $backup_path"
-            mkdir -p "$backup_path"
-            
-            if [ $? -ne 0 ]; then
-                warning "Could not create backup directory automatically"
-                warning "You may need to create it manually or check drive mapping"
-                
-                if [ "$PLATFORM" == "wsl" ]; then
-                    info "For WSL, make sure your Google Drive is mounted correctly"
-                    info "Try to create this path from Windows Explorer: G:\\My Drive\\Backups"
-                fi
-            else
-                success "Created backup directory: $backup_path"
-            fi
-        fi
-    else
-        error "No backup path provided. Backup location may not work correctly."
-    fi
-    
-    # Ask if they want to enable encryption
-    read -p "Do you want to enable backup encryption? (y/n): " enable_encryption
-    
-    if [[ "$enable_encryption" =~ ^[Yy]$ ]]; then
-        # Use different sed syntax based on platform (macOS vs Linux)
-        if [ "$(uname)" == "Darwin" ]; then
-            sed -i '' "s/BACKUP_ENCRYPTION=false/BACKUP_ENCRYPTION=true/" "$SCRIPTS_DIR/config/backup.conf"
-        else
-            sed -i "s/BACKUP_ENCRYPTION=false/BACKUP_ENCRYPTION=true/" "$SCRIPTS_DIR/config/backup.conf"
-        fi
-        
-        # Ask for encryption password and store it securely
-        read -s -p "Enter encryption password: " encryption_password
-        echo ""
-        
-        if [ -n "$encryption_password" ]; then
-            # Use different sed syntax based on platform (macOS vs Linux)
-            if [ "$(u            if [ -d "$DOTFILES_DIR/vscode/snippets" ]; then
-                # Backup existing snippets if they exist
-                if [ -d "$VSCODE_DIR/snippets" ]; then
-                    mkdir -p "$BACKUP_DIR/vscode"
-                    cp -r "$VSCODE_DIR/snippets" "$BACKUP_DIR/vscode/"
-                    log "Backed up existing VS Code snippets to $BACKUP_DIR/vscode/"
-                fi
-                
-                mkdir -p "$VSCODE_DIR/snippets"
-                cp -r "$DOTFILES_DIR/vscode/snippets/"* "$VSCODE_DIR/snippets/"
-                log "Restored VS Code snippets"
-            fi
-        else
-            log "Warning: VS Code settings directory not found, skipping VS Code settings restoration"
-        fi
-    fi
-    
-    log "Restore completed successfully"
-    
-    if [ "$(ls -A "$BACKUP_DIR")" ]; then
-        log "Your original files have been backed up to $BACKUP_DIR"
-    else
-        # Remove empty backup directory
-        rmdir "$BACKUP_DIR"
-    fi
-}
-
-# Parse command line arguments
-if [ $# -eq 0 ]; then
-    show_help
-fi
-
-case "$1" in
-    --setup)
-        check_git
-        setup_repo
-        ;;
-    --backup)
-        check_git
-        backup_dotfiles
-        ;;
-    --restore)
-        check_git
-        restore_dotfiles
-        ;;
-    --help)
-        show_help
-        ;;
-    *)
-        echo "Unknown option: $1"
-        show_help
-        ;;
-esac
-
-exit 0
-EOL
-
-    chmod +x "$SCRIPTS_DIR/backup/sync_dotfiles.sh"
-    
-    # Create configuration file
-    mkdir -p "$SCRIPTS_DIR/config"
-    
-    cat > "$SCRIPTS_DIR/config/dotfiles_sync.conf" << 'EOL'
-# Configuration for Dotfiles Sync Script
-
-# Repository settings
-DOTFILES_DIR="$HOME/.dotfiles"
-DOTFILES_REPO=""  # Set this to your GitHub repository URL
-DOTFILES_BRANCH="main"
-
-# Files to sync
-SYNC_FILES=(
-    ".zshrc"
-    ".bashrc"
-    ".bash_aliases"
-    ".gitconfig"
-    ".vimrc"
-    ".tmux.conf"
-    ".prettierrc"
-    ".editorconfig"
-)
-
-# VS Code settings
-SYNC_VSCODE=true
-VSCODE_SETTINGS_DIR="$HOME/.config/Code/User"
-VSCODE_SETTINGS_WIN_DIR="/mnt/c/Users/$USER/AppData/Roaming/Code/User"
-EOL
-
-    return 0
-}
-
-setup_dotfiles_syncer() {
-    info "Setting up Dotfiles Syncer..."
-    
-    # Create the script if it doesn't exist
-    if [ ! -f "$SCRIPTS_DIR/backup/sync_dotfiles.sh" ]; then
-        create_dotfiles_syncer_script
-    fi
-    
-    # Ask for repository URL
-    read -p "Enter your GitHub repository URL for dotfiles (e.g., git@github.com:username/dotfiles.git): " repo_url
-    
-    if [ -n "$repo_url" ]; then
-        # Update the config file
-        if [ "$(uname)" == "Darwin" ]; then
-            sed -i '' "s|DOTFILES_REPO=\"\"|DOTFILES_REPO=\"$repo_url\"|" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
-        else
-            sed -i "s|DOTFILES_REPO=\"\"|DOTFILES_REPO=\"$repo_url\"|" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
-        fi
-        
-        success "Repository URL set to $repo_url"
-    else
-        warning "No repository URL provided. You'll need to set it up later."
-    fi
-    
-    # Ask which files to sync
-    read -p "Do you want to customize which files to sync? (y/n): " customize_files
-    
-    if [[ "$customize_files" =~ ^[Yy]$ ]]; then
-        echo "Enter the files you want to sync (separated by space):"
-        echo "For example: .zshrc .bashrc .gitconfig"
-        read -p "> " custom_files
-        
-        if [ -n "$custom_files" ]; then
-            # Update the config file
-            echo "SYNC_FILES=(" > "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
-            for file in $custom_files; do
-                echo "    \"$file\"" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
-            done
-            echo ")" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
-            
-            # Get the rest of the config file
-            grep -v "^SYNC_FILES=" "$SCRIPTS_DIR/config/dotfiles_sync.conf" | grep -v "^)" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
-            
-            # Replace the config file
-            mv "$SCRIPTS_DIR/config/dotfiles_sync.conf.new" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
-            
-            success "Custom files set for syncing"
-        fi
-    fi
-    
-    # Ask if they want to set up the repository now
-    read -p "Do you want to set up the dotfiles repository now? (y/n): " setup_now
-    
-    if [[ "$setup_now" =~ ^[Yy]$ ]]; then
-        # Check for SSH key
-        if [ ! -f "$HOME/.ssh/id_ed25519" ] && [ ! -f "$HOME/.ssh/id_rsa" ]; then
-            warning "No SSH key found. You might need to create one for GitHub access."
-            read -p "Do you want to create an SSH key now? (y/n): " create_key
-            
-            if [[ "$create_key" =~ ^[Yy]$ ]]; then
-                read -p "Enter your email for the SSH key: " key_email
-                ssh-keygen -t ed25519 -C "$key_email"
-                
-                if [ $? -eq 0 ]; then
-                    success "SSH key created successfully"
-                    echo "You'll need to add this key to your GitHub account:"
-                    cat "$HOME/.ssh/id_ed25519.pub"
-                    echo ""
-                    read -p "Press Enter when you've added the key to GitHub..."
-                else
-                    error "Failed to create SSH key"
-                    read -p "Press Enter to continue anyway..."
-                fi
-            fi
-        fi
-        
-        bash "$SCRIPTS_DIR/backup/sync_dotfiles.sh" --setup
-        if [ $? -ne 0 ]; then
-            error "Repository setup failed"
-        fi
-    else
-        info "You can set up the repository later with: $SCRIPTS_DIR/backup/sync_dotfiles.sh --setup"
-    fi
-    
-    # Set up a periodic backup
-    read -p "Do you want to set up a weekly dotfiles backup? (y/n): " setup_cron
-    
-    if [[ "$setup_cron" =~ ^[Yy]$ ]]; then
-        # Check if crontab is installed
-        if command -v crontab &> /dev/null; then
-            # Add cron job for weekly backup
-            (crontab -l 2>/dev/null || echo "") | grep -v "sync_dotfiles.sh" | { cat; echo "0 0 * * 0 $SCRIPTS_DIR/backup/sync_dotfiles.sh --backup > $SCRIPTS_DIR/logs/dotfiles_sync_cron.log 2>&1"; } | crontab -
-            
-            if [ $? -eq 0 ]; then
-                success "Weekly backup scheduled via crontab"
-            else
-                error "Failed to schedule backup via crontab"
-            fi
-        else
-            warning "crontab not found. You'll need to schedule backups manually."
-        fi
-    fi
-    
-    success "Dotfiles Syncer setup complete"
-    
-    read -p "Press Enter to return to the main menu..."
-    show_menu
-}
-
-# ======= 7. System Backup Script =======
-create_backup_scripts() {
-    info "Creating System Backup scripts..."
-    
-    mkdir -p "$SCRIPTS_DIR/backup"
-    
-    cat > "$SCRIPTS_DIR/backup/backup_projects.sh" << 'EOL'
