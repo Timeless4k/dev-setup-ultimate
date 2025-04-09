@@ -1,1568 +1,3 @@
-        return 1
-    fi
-    
-    # Get task details
-    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
-    IFS=, read -r name due_date description status <<< "$task_line"
-    
-    # Calculate days until due
-    local days=$(days_until_due "$due_date")
-    
-    # Display task details
-    echo -e "${COLOR_BLUE}=== Task Details ===${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}Name:${COLOR_RESET}        $name"
-    echo -e "${COLOR_CYAN}Due Date:${COLOR_RESET}    $(format_date "$due_date")"
-    echo -e "${COLOR_CYAN}Description:${COLOR_RESET} $description"
-    echo -e "${COLOR_CYAN}Status:${COLOR_RESET}      $([ "$status" = "Completed" ] && echo -e "${COLOR_GREEN}Completed${COLOR_RESET}" || echo -e "${COLOR_YELLOW}Pending${COLOR_RESET}")"
-    
-    # Check if task folder exists
-    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-    if [ -d "$task_dir" ]; then
-        echo -e "${COLOR_CYAN}Folder:${COLOR_RESET}      $task_dir"
-        
-        # Check for files in the task folder
-        file_count=$(find "$task_dir" -type f | wc -l)
-        if [ $file_count -gt 1 ]; then  # More than just README.md
-            echo -e "${COLOR_CYAN}Files:${COLOR_RESET}       $(($file_count - 1)) files in folder (excluding README)"
-            echo ""
-            echo -e "${COLOR_BLUE}Files in task folder:${COLOR_RESET}"
-            find "$task_dir" -type f -not -name "README.md" | while read -r file; do
-                echo -e "- ${COLOR_CYAN}$(basename "$file")${COLOR_RESET} ($(du -h "$file" | cut -f1))"
-            done
-        else
-            echo -e "${COLOR_CYAN}Files:${COLOR_RESET}       No additional files in folder"
-        fi
-    else
-        echo -e "${COLOR_CYAN}Folder:${COLOR_RESET}      Not created yet"
-    fi
-}
-
-# List pending tasks
-list_pending() {
-    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
-        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
-        return
-    fi
-    
-    echo -e "${COLOR_BLUE}Pending Academic Tasks:${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              ${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}------------------------------------------------${COLOR_RESET}"
-    
-    # Skip header line and process each task
-    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
-        if [ "$status" != "Completed" ]; then
-            # Find the line number using pattern matching
-            line_pattern="$name,$due_date,$description,$status"
-            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
-            
-            if [ -z "$line_number" ]; then
-                continue
-            fi
-            
-            # Adjust line number to be zero-based ID
-            line_number=$((line_number - 1))
-            
-            # Format name (truncate if too long)
-            if [ ${#name} -gt 20 ]; then
-                name="${name:0:17}..."
-            fi
-            
-            # Print task
-            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s\n" "$line_number" "$name" "$(format_date "$due_date")"
-        fi
-    done
-}
-
-# List tasks due today
-list_today() {
-    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
-        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
-        return
-    fi
-    
-    echo -e "${COLOR_BLUE}Tasks Due Today:${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}ID  | Name                    | Status     ${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}----------------------------------------${COLOR_RESET}"
-    
-    local today=$(date +%Y-%m-%d)
-    local found=false
-    
-    # Skip header line and process each task
-    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
-        if [ "$due_date" = "$today" ]; then
-            found=true
-            
-            # Find the line number using pattern matching
-            line_pattern="$name,$due_date,$description,$status"
-            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
-            
-            if [ -z "$line_number" ]; then
-                continue
-            fi
-            
-            # Adjust line number to be zero-based ID
-            line_number=$((line_number - 1))
-            
-            # Format name (truncate if too long)
-            if [ ${#name} -gt 20 ]; then
-                name="${name:0:17}..."
-            fi
-            
-            # Format status
-            if [ "$status" = "Completed" ]; then
-                status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
-            else
-                status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
-            fi
-            
-            # Print task
-            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %s\n" "$line_number" "$name" "$status_text"
-        fi
-    done
-    
-    if [ "$found" = false ]; then
-        echo -e "${COLOR_YELLOW}No tasks due today.${COLOR_RESET}"
-    fi
-}
-
-# List tasks due this week
-list_week() {
-    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
-        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
-        return
-    fi
-    
-    echo -e "${COLOR_BLUE}Tasks Due This Week:${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              | Status     ${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}----------------------------------------------------------${COLOR_RESET}"
-    
-    local found=false
-    
-    # Skip header line and process each task
-    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
-        local days=$(days_until_due "$due_date")
-        
-        if [ $days -ge 0 ] && [ $days -lt 7 ]; then
-            found=true
-            
-            # Find the line number using pattern matching
-            line_pattern="$name,$due_date,$description,$status"
-            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
-            
-            if [ -z "$line_number" ]; then
-                continue
-            fi
-            
-            # Adjust line number to be zero-based ID
-            line_number=$((line_number - 1))
-            
-            # Format name (truncate if too long)
-            if [ ${#name} -gt 20 ]; then
-                name="${name:0:17}..."
-            fi
-            
-            # Format status
-            if [ "$status" = "Completed" ]; then
-                status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
-            else
-                status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
-            fi
-            
-            # Print task
-            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s | %s\n" "$line_number" "$name" "$(format_date "$due_date")" "$status_text"
-        fi
-    done
-    
-    if [ "$found" = false ]; then
-        echo -e "${COLOR_YELLOW}No tasks due this week.${COLOR_RESET}"
-    fi
-}
-
-# Main function to process commands
-main() {
-    if [ $# -eq 0 ]; then
-        show_help
-        return
-    fi
-    
-    case "$1" in
-        list)
-            list_tasks
-            ;;
-        add)
-            add_task
-            ;;
-        complete)
-            complete_task "$2"
-            ;;
-        delete)
-            delete_task "$2"
-            ;;
-        edit)
-            edit_task "$2"
-            ;;
-        view)
-            view_task "$2"
-            ;;
-        pending)
-            list_pending
-            ;;
-        today)
-            list_today
-            ;;
-        week)
-            list_week
-            ;;
-        help)
-            show_help
-            ;;
-        *)
-            echo -e "${COLOR_RED}Unknown command: $1${COLOR_RESET}"
-            show_help
-            ;;
-    esac
-}
-
-# Run main function with all arguments
-main "$@"
-EOL
-
-    chmod +x "$SCRIPTS_DIR/academic/task_manager.sh"
-    
-    # Create an alias for easy access
-    if ! grep -q "alias task=" "$HOME/.bash_aliases" 2>/dev/null; then
-        echo 'alias task="$HOME/scripts/academic/task_manager.sh"' >> "$HOME/.bash_aliases"
-    fi
-    
-    return 0
-}
-
-setup_academic_tracker() {
-    info "Setting up Academic Project Tracker..."
-    
-    # Create the script if it doesn't exist
-    if [ ! -f "$SCRIPTS_DIR/academic/task_manager.sh" ]; then
-        create_academic_tracker_script
-    fi
-    
-    # Create an example task to show how it works
-    if [ ! -s "$SCRIPTS_DIR/academic/tasks.csv" ] || [ $(wc -l < "$SCRIPTS_DIR/academic/tasks.csv") -le 1 ]; then
-        echo "Name,Due Date,Description,Status" > "$SCRIPTS_DIR/academic/tasks.csv"
-        
-        # Calculate a due date one week from now using platform-specific date commands
-        if [ "$PLATFORM" == "macos" ]; then
-            # macOS date command
-            due_date=$(date -v+7d +%Y-%m-%d)
-        else
-            # Linux date command
-            due_date=$(date -d "+7 days" +%Y-%m-%d)
-        fi
-        
-        echo "Example Assignment,$due_date,This is an example assignment to demonstrate the task tracker.,Pending" >> "$SCRIPTS_DIR/academic/tasks.csv"
-        
-        # Create example folder
-        mkdir -p "$HOME/Uni/Example_Assignment"
-        
-        # Create README
-        cat > "$HOME/Uni/Example_Assignment/README.md" << EOF
-# Example Assignment
-
-**Due Date:** $due_date
-**Status:** Pending
-
-## Description
-This is an example assignment to demonstrate the task tracker.
-
-## Notes
-- This is just an example
-- You can add your own notes here
-
-## Resources
-- Course website: https://example.edu/course
-- Lecture notes: Week 3
-EOF
-
-        success "Example task created"
-    fi
-    
-    # Demonstrate the tool
-    echo ""
-    echo "===== Academic Project Tracker Demo ====="
-    bash "$SCRIPTS_DIR/academic/task_manager.sh" list
-    echo ""
-    echo "Available commands:"
-    echo "  task list              - List all tasks"
-    echo "  task add               - Add a new task"
-    echo "  task complete <id>     - Mark a task as complete"
-    echo "  task edit <id>         - Edit a task"
-    echo "  task view <id>         - View task details"
-    echo "  task week              - See tasks due this week"
-    echo ""
-    echo "Tasks are stored in: $SCRIPTS_DIR/academic/tasks.csv"
-    echo "Project folders are created in: $HOME/Uni/"
-    echo ""
-    
-    success "Academic Project Tracker setup complete"
-    
-    read -p "Press Enter to return to the main menu..."
-    show_menu
-}
-
-# ======= 9. Configure All Tools =======
-configure_all_tools() {
-    info "Configuring all tools..."
-    
-    # User information
-    read -p "Enter your full name for configuration [$DEFAULT_USERNAME]: " full_name
-    full_name=${full_name:-$DEFAULT_USERNAME}
-    
-    read -p "Enter your email for configuration [$DEFAULT_EMAIL]: " email
-    email=${email:-$DEFAULT_EMAIL}
-    
-    read -p "Enter your GitHub username [$DEFAULT_GITHUB_USERNAME]: " github_username
-    github_username=${github_username:-$DEFAULT_GITHUB_USERNAME}
-    
-    # Get Google Drive path for backups
-    backup_path=$(get_google_drive_path)
-    
-    # Update config files
-    if [ -f "$SCRIPTS_DIR/config/backup.conf" ]; then
-        # Use different sed syntax based on platform
-        if [ "$(uname)" == "Darwin" ]; then
-            # macOS sed
-            sed -i '' "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
-        else
-            # Linux sed
-            sed -i "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
-        fi
-        
-        success "Backup path set to $backup_path"
-    fi
-    
-    # Set up Git config
-    if [ -n "$full_name" ]; then
-        git config --global user.name "$full_name"
-        success "Git username set to: $full_name"
-    fi
-    
-    if [ -n "$email" ]; then
-        git config --global user.email "$email"
-        success "Git email set to: $email"
-    fi
-    
-    # Set up Zsh theme if zsh is installed
-    if [ -f "$HOME/.zshrc" ]; then
-        if grep -q "ZSH_THEME=\"robbyrussell\"" "$HOME/.zshrc"; then
-            if [ "$(uname)" == "Darwin" ]; then
-                # macOS sed
-                sed -i '' 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
-            else
-                # Linux sed
-                sed -i 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
-            fi
-            success "Zsh theme set to Powerlevel10k"
-        fi
-    fi
-    
-    # Configure VS Code settings if present
-    vs_code_dir=""
-    if [ -d "$HOME/.config/Code/User" ]; then
-        vs_code_dir="$HOME/.config/Code/User"
-    elif [ "$PLATFORM" == "wsl" ]; then
-        # Try to detect VS Code settings in Windows
-        WIN_USER=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r')
-        if [ -n "$WIN_USER" ] && [[ ! "$WIN_USER" == *"%" ]]; then
-            POTENTIAL_VSCODE_DIR="/mnt/c/Users/$WIN_USER/AppData/Roaming/Code/User"
-            if [ -d "$POTENTIAL_VSCODE_DIR" ]; then
-                vs_code_dir="$POTENTIAL_VSCODE_DIR"
-            fi
-        fi
-    fi
-    
-    if [ -n "$vs_code_dir" ]; then
-        mkdir -p "$vs_code_dir"
-        
-        # Create settings.json
-        cat > "$vs_code_dir/settings.json" << EOF
-{
-    "editor.fontFamily": "JetBrains Mono, Consolas, 'Courier New', monospace",
-    "editor.fontSize": 14,
-    "editor.lineHeight": 22,
-    "editor.fontWeight": "400",
-    "editor.tabSize": 2,
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
-    "editor.codeActionsOnSave": {
-        "source.fixAll.eslint": true
-    },
-    "editor.bracketPairColorization.enabled": true,
-    "editor.guides.bracketPairs": true,
-    "editor.minimap.enabled": false,
-    "editor.rulers": [80, 100],
-    "editor.wordWrap": "on",
-    "explorer.confirmDelete": false,
-    "explorer.confirmDragAndDrop": false,
-    "files.associations": {
-        "*.css": "css"
-    },
-    "files.trimTrailingWhitespace": true,
-    "files.insertFinalNewline": true,
-    "files.exclude": {
-        "**/.git": true,
-        "**/.DS_Store": true,
-        "**/node_modules": true,
-        "**/__pycache__": true,
-        "**/venv": true,
-        ".pytest_cache": true,
-        ".coverage": true
-    },
-    "terminal.integrated.fontFamily": "JetBrains Mono, Consolas, 'Courier New', monospace",
-    "terminal.integrated.fontSize": 14,
-    "workbench.colorTheme": "One Dark Pro",
-    "workbench.iconTheme": "material-icon-theme",
-    "workbench.editor.enablePreview": false,
-    "workbench.startupEditor": "newUntitledFile",
-    "javascript.updateImportsOnFileMove.enabled": "always",
-    "javascript.format.enable": false,
-    "python.formatting.provider": "black",
-    "python.linting.enabled": true,
-    "python.linting.pylintEnabled": true,
-    "python.linting.flake8Enabled": true,
-    "jupyter.themeMatplotlibPlots": true,
-    "jupyter.askForKernelRestart": false,
-    "[javascript]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.formatOnSave": true
-    },
-    "[typescript]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.formatOnSave": true
-    },
-    "[python]": {
-        "editor.formatOnSave": true,
-        "editor.defaultFormatter": "ms-python.python"
-    },
-    "[json]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode"
-    },
-    "[html]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode"
-    },
-    "[css]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode"
-    }
-}
-EOF
-        
-        success "VS Code settings configured"
-    else
-        warning "VS Code settings directory not found. Skipping VS Code configuration."
-    fi
-    
-    success "All tools configured"
-    
-    read -p "Press Enter to return to the main menu..."
-    show_menu
-}
-
-# ======= Main Script Execution =======
-# Display the main menu to start
-show_menu
-            # Use different sed syntax based on platform (macOS vs Linux)
-            if [ "$(uname)" == "Darwin" ]; then
-                sed -i '' "s/ENCRYPTION_PASSWORD=\"\"/ENCRYPTION_PASSWORD=\"$encryption_password\"/" "$SCRIPTS_DIR/config/backup.conf"
-            else
-                sed -i "s/ENCRYPTION_PASSWORD=\"\"/ENCRYPTION_PASSWORD=\"$encryption_password\"/" "$SCRIPTS_DIR/config/backup.conf"
-            fi
-            
-            success "Encryption enabled and password set"
-            
-            # Security warning
-            warning "Note: Your encryption password is stored in plain text in $SCRIPTS_DIR/config/backup.conf"
-            warning "Consider restricting access to this file: chmod 600 $SCRIPTS_DIR/config/backup.conf"
-            
-            # Set appropriate permissions on the config file
-            chmod 600 "$SCRIPTS_DIR/config/backup.conf"
-        else
-            warning "No password provided, encryption may not work correctly"
-        fi
-    fi
-    
-    # Ask how many days to keep backups
-    read -p "How many days do you want to keep backups? (default: 30): " retention_days
-    
-    if [ -n "$retention_days" ] && [[ "$retention_days" =~ ^[0-9]+$ ]]; then
-        # Use different sed syntax based on platform (macOS vs Linux)
-        if [ "$(uname)" == "Darwin" ]; then
-            sed -i '' "s/RETENTION_DAYS=30/RETENTION_DAYS=$retention_days/" "$SCRIPTS_DIR/config/backup.conf"
-        else
-            sed -i "s/RETENTION_DAYS=30/RETENTION_DAYS=$retention_days/" "$SCRIPTS_DIR/config/backup.conf"
-        fi
-        
-        success "Backup retention set to $retention_days days"
-    fi
-    
-    # Ask if they want to run it now
-    read -p "Do you want to run the backup now? (y/n): " run_now
-    
-    if [[ "$run_now" =~ ^[Yy]$ ]]; then
-        # Source the updated config before running
-        source "$SCRIPTS_DIR/config/backup.conf"
-        
-        # Check access to backup location before running
-        if [ ! -d "$BACKUP_BASE_DIR" ]; then
-            warning "Backup location $BACKUP_BASE_DIR doesn't exist or is not accessible"
-            
-            if [ "$PLATFORM" == "wsl" ]; then
-                # For WSL, provide more specific guidance about Google Drive paths
-                info "The Google Drive path is not accessible from WSL."
-                info "Check that G: drive is properly mounted in Windows"
-                info "Make sure 'G:\\My Drive\\Backups' exists in Windows Explorer"
-                
-                read -p "Try to create the backup directory manually? (y/n): " create_dir
-                
-                if [[ "$create_dir" =~ ^[Yy]$ ]]; then
-                    # Try a more robust directory creation approach
-                    mkdir -p "$BACKUP_BASE_DIR" 2>/dev/null
-                    
-                    if [ ! -d "$BACKUP_BASE_DIR" ]; then
-                        # If that fails, try using cmd.exe as fallback
-                        win_path=$(echo "$BACKUP_BASE_DIR" | sed 's|/mnt/\([a-z]\)|\U\1:|' | sed 's|/|\\|g')
-                        cmd.exe /C "mkdir \"$win_path\"" 2>/dev/null
-                        
-                        # Check again
-                        if [ ! -d "$BACKUP_BASE_DIR" ]; then
-                            error "Could not create backup directory."
-                            info "Please create the following directory manually in Windows:"
-                            info "G:\\My Drive\\Backups"
-                            
-                            read -p "Press Enter to continue..."
-                            return 1
-                        fi
-                    fi
-                else
-                    warning "Backup cannot proceed without a valid backup location"
-                    info "Please create the directory manually and try again"
-                    read -p "Press Enter to continue..."
-                    return 1
-                fi
-            else
-                # For non-WSL platforms
-                read -p "Do you want to create it? (y/n): " create_dir
-                
-                if [[ "$create_dir" =~ ^[Yy]$ ]]; then
-                    mkdir -p "$BACKUP_BASE_DIR"
-                    if [ $? -ne 0 ]; then
-                        error "Failed to create backup directory. Please check your configuration."
-                        info "You may need to create the directory manually or specify a different location."
-                        return 1
-                    fi
-                else
-                    warning "Backup cannot proceed without a valid backup location"
-                    info "Please create the directory manually and try again"
-                    read -p "Press Enter to continue..."
-                    return 1
-                fi
-            fi
-        fi
-        
-        # Run the backup with error handling
-        if ! bash "$SCRIPTS_DIR/backup/backup_projects.sh"; then
-            error "Backup failed. Check logs for details: $SCRIPTS_DIR/logs/"
-        else
-            success "Backup completed successfully"
-        fi
-    fi
-    
-    # Ask if they want to schedule it
-    read -p "Do you want to schedule this to run weekly? (y/n): " schedule_it
-    
-    if [[ "$schedule_it" =~ ^[Yy]$ ]]; then
-        # Create scheduled task script with improved robustness
-        cat > "$SCRIPTS_DIR/backup/setup_backup_task.ps1" << 'EOL'
-# Setup Windows Task Scheduler for Weekly Backup
-# Run this with PowerShell as Administrator
-
-$ErrorActionPreference = "Stop"
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-
-# Check if running as Administrator
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "❌ This script needs to be run as Administrator." -ForegroundColor Red
-    Write-Host "Please right-click the PowerShell icon and select 'Run as administrator', then try again." -ForegroundColor Yellow
-    exit 1
-}
-
-try {
-    $taskName = "WeeklySystemBackup"
-    $taskDescription = "Weekly backup of projects and configuration files"
-    $scriptPath = "$env:USERPROFILE\scripts\backup\backup_projects.bat"
-
-    # Check for WSL paths
-    $wslPath = Get-ChildItem "$env:USERPROFILE\AppData\Local\Packages\*Ubuntu*\LocalState\rootfs\home\*\scripts\backup\backup_projects.bat" -ErrorAction SilentlyContinue
-    
-    if ($wslPath) {
-        Write-Host "Found WSL script at: $($wslPath.FullName)" -ForegroundColor Cyan
-        $scriptPath = $wslPath.FullName
-    }
-    
-    # Verify script exists
-    if (-not (Test-Path $scriptPath)) {
-        Write-Host "❌ Script not found at: $scriptPath" -ForegroundColor Red
-        $manualPath = Read-Host "Enter the full path to backup_projects.bat (or press Enter to cancel)"
-        
-        if ([string]::IsNullOrEmpty($manualPath)) {
-            Write-Host "Task setup cancelled." -ForegroundColor Yellow
-            exit 1
-        }
-        
-        if (-not (Test-Path $manualPath)) {
-            Write-Host "❌ Script still not found. Please verify the path and try again." -ForegroundColor Red
-            exit 1
-        }
-        
-        $scriptPath = $manualPath
-    }
-
-    # Create a new task action
-    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$scriptPath`""
-
-    # Create a trigger to run weekly on Sunday at 2 AM
-    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 2am
-
-    # Register the task with higher privileges
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Description $taskDescription -RunLevel Highest -Force
-
-    Write-Host "✅ Weekly backup scheduled task created successfully!" -ForegroundColor Green
-    Write-Host "⏰ The task will run every Sunday at 2:00 AM" -ForegroundColor Cyan
-}
-catch {
-    Write-Host "❌ Error creating scheduled task: $_" -ForegroundColor Red
-    exit 1
-}
-EOL
-
-        success "PowerShell script for task scheduling created"
-        info "To schedule the task, please run the PowerShell script as administrator:"
-        info "PowerShell.exe -ExecutionPolicy Bypass -File \"$SCRIPTS_DIR/backup/setup_backup_task.ps1\""
-    fi
-    
-    success "System Backup setup complete"
-    
-    # Add a reminder about backup in .zshrc if not already present
-    if [ -f "$HOME/.zshrc" ] && ! grep -q "backup_projects.sh" "$HOME/.zshrc"; then
-        cat >> "$HOME/.zshrc" << 'EOL'
-
-# Backup reminder - check if it's been more than 7 days since last backup
-if [ -f ~/last_backup.txt ]; then
-    last_backup=$(cat ~/last_backup.txt)
-    today=$(date +%Y-%m-%d)
-    
-    # Handle different date commands based on OS
-    if [ "$(uname)" == "Darwin" ]; then
-        # macOS
-        last_backup_seconds=$(date -j -f "%Y-%m-%d" "$last_backup" +%s)
-        today_seconds=$(date -j -f "%Y-%m-%d" "$today" +%s)
-    else
-        # Linux
-        last_backup_seconds=$(date -d "$last_backup" +%s)
-        today_seconds=$(date -d "$today" +%s)
-    fi
-    
-    days_diff=$(( (today_seconds - last_backup_seconds) / 86400 ))
-    
-    if [ $days_diff -gt 7 ]; then
-        echo "⚠️  It's been $days_diff days since your last backup. Consider running: backup"
-    fi
-fi
-EOL
-
-        success "Backup reminder added to .zshrc"
-    fi
-    
-    read -p "Press Enter to return to the main menu..."
-    show_menu
-}
-
-# ======= 8. Academic Project Tracker =======
-create_academic_tracker_script() {
-    info "Creating Academic Project Tracker script..."
-    
-    mkdir -p "$SCRIPTS_DIR/academic"
-    
-    cat > "$SCRIPTS_DIR/academic/task_manager.sh" << 'EOL'
-#!/bin/bash
-# Academic Task Manager
-# Helps track assignments, projects, and deadlines
-
-set -e
-
-# Configuration
-SCRIPT_DIR="$HOME/scripts"
-CONFIG_DIR="$SCRIPT_DIR/config"
-TASKS_FILE="$SCRIPT_DIR/academic/tasks.csv"
-UNI_DIR="$HOME/Uni"
-
-# Function to detect platform - WSL, Linux, or macOS
-detect_platform() {
-    if grep -q Microsoft /proc/version 2>/dev/null; then
-        echo "wsl"
-    elif [[ "$(uname)" == "Darwin" ]]; then
-        echo "macos"
-    else
-        echo "linux"
-    fi
-}
-
-PLATFORM=$(detect_platform)
-
-# Create directories if they don't exist
-mkdir -p "$SCRIPT_DIR/academic"
-mkdir -p "$UNI_DIR"
-
-# Create tasks file if it doesn't exist
-if [ ! -f "$TASKS_FILE" ]; then
-    echo "Name,Due Date,Description,Status" > "$TASKS_FILE"
-fi
-
-# Colorized output
-COLOR_RED='\033[0;31m'
-COLOR_GREEN='\033[0;32m'
-COLOR_YELLOW='\033[0;33m'
-COLOR_BLUE='\033[0;34m'
-COLOR_PURPLE='\033[0;35m'
-COLOR_CYAN='\033[0;36m'
-COLOR_RESET='\033[0m'
-
-# Help function
-show_help() {
-    echo -e "${COLOR_BLUE}Academic Task Manager${COLOR_RESET}"
-    echo -e "${COLOR_GREEN}Usage:${COLOR_RESET} $(basename $0) [command] [options]"
-    echo ""
-    echo -e "${COLOR_YELLOW}Commands:${COLOR_RESET}"
-    echo -e "  ${COLOR_CYAN}list${COLOR_RESET}                   List all tasks"
-    echo -e "  ${COLOR_CYAN}add${COLOR_RESET}                    Add a new task"
-    echo -e "  ${COLOR_CYAN}complete ${COLOR_RED}<id>${COLOR_RESET}           Mark a task as complete"
-    echo -e "  ${COLOR_CYAN}delete ${COLOR_RED}<id>${COLOR_RESET}             Delete a task"
-    echo -e "  ${COLOR_CYAN}edit ${COLOR_RED}<id>${COLOR_RESET}               Edit a task"
-    echo -e "  ${COLOR_CYAN}view ${COLOR_RED}<id>${COLOR_RESET}               View task details"
-    echo -e "  ${COLOR_CYAN}pending${COLOR_RESET}                List pending tasks"
-    echo -e "  ${COLOR_CYAN}today${COLOR_RESET}                  List tasks due today"
-    echo -e "  ${COLOR_CYAN}week${COLOR_RESET}                   List tasks due this week"
-    echo -e "  ${COLOR_CYAN}help${COLOR_RESET}                   Show this help message"
-    echo ""
-    echo -e "${COLOR_YELLOW}Examples:${COLOR_RESET}"
-    echo -e "  $(basename $0) add"
-    echo -e "  $(basename $0) list"
-    echo -e "  $(basename $0) complete 2"
-    echo ""
-}
-
-# Function to validate date format
-validate_date() {
-    local date_str="$1"
-    
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS date validation
-        date -j -f "%Y-%m-%d" "$date_str" >/dev/null 2>&1
-    else
-        # Linux date validation
-        date -d "$date_str" >/dev/null 2>&1
-    fi
-    
-    return $?
-}
-
-# Function to calculate days until due
-days_until_due() {
-    local due_date="$1"
-    local today=$(date +%s)
-    local due
-    
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS
-        due=$(date -j -f "%Y-%m-%d" "$due_date" +%s)
-    else
-        # Linux
-        due=$(date -d "$due_date" +%s)
-    fi
-    
-    echo $(( (due - today) / 86400 ))
-}
-
-# Format date output
-format_date() {
-    local date_str="$1"
-    local days=$(days_until_due "$date_str")
-    local formatted_date
-    
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS
-        formatted_date=$(date -j -f "%Y-%m-%d" "$date_str" "+%Y-%m-%d")
-    else
-        # Linux
-        formatted_date=$(date -d "$date_str" "+%Y-%m-%d")
-    fi
-    
-    if [ $days -lt 0 ]; then
-        echo -e "${COLOR_RED}$formatted_date (${days#-} days overdue)${COLOR_RESET}"
-    elif [ $days -eq 0 ]; then
-        echo -e "${COLOR_RED}$formatted_date (Due today)${COLOR_RESET}"
-    elif [ $days -eq 1 ]; then
-        echo -e "${COLOR_YELLOW}$formatted_date (Due tomorrow)${COLOR_RESET}"
-    elif [ $days -le 7 ]; then
-        echo -e "${COLOR_YELLOW}$formatted_date (Due in $days days)${COLOR_RESET}"
-    else
-        echo -e "${COLOR_GREEN}$formatted_date (Due in $days days)${COLOR_RESET}"
-    fi
-}
-
-# List tasks
-list_tasks() {
-    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
-        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
-        return
-    fi
-    
-    echo -e "${COLOR_BLUE}Academic Tasks:${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              | Status     ${COLOR_RESET}"
-    echo -e "${COLOR_CYAN}----------------------------------------------------------${COLOR_RESET}"
-    
-    # Skip header line and process each task
-    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
-        # Find the line number by pattern matching the entire line
-        # We use pattern matching instead of line counter to handle potential issues with different IFS settings
-        line_pattern="$name,$due_date,$description,$status"
-        line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
-        
-        if [ -z "$line_number" ]; then
-            continue
-        fi
-        
-        # Adjust line number to be zero-based ID
-        line_number=$((line_number - 1))
-        
-        # Format name (truncate if too long)
-        if [ ${#name} -gt 20 ]; then
-            name="${name:0:17}..."
-        fi
-        
-        # Format status
-        if [ "$status" = "Completed" ]; then
-            status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
-        else
-            status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
-        fi
-        
-        # Print task
-        printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s | %s\n" "$line_number" "$name" "$(format_date "$due_date")" "$status_text"
-    done
-}
-
-# Add a new task
-add_task() {
-    echo -e "${COLOR_BLUE}Add a new academic task:${COLOR_RESET}"
-    
-    # Get task details
-    read -p "Task name: " name
-    
-    while true; do
-        read -p "Due date (YYYY-MM-DD): " due_date
-        if validate_date "$due_date"; then
-            break
-        else
-            echo -e "${COLOR_RED}Invalid date format. Please use YYYY-MM-DD.${COLOR_RESET}"
-        fi
-    done
-    
-    read -p "Description: " description
-    
-    # Add task to CSV, escaping any commas in the name or description
-    # Replace any existing commas with semicolons to avoid CSV field issues
-    safe_name="${name//,/;}"
-    safe_description="${description//,/;}"
-    
-    echo "$safe_name,$due_date,$safe_description,Pending" >> "$TASKS_FILE"
-    
-    # Create folder for the task
-    task_dir="$UNI_DIR/$(echo "$safe_name" | tr ' ' '_')"
-    mkdir -p "$task_dir"
-    
-    # Create README for the task
-    cat > "$task_dir/README.md" << EOF
-# $safe_name
-
-**Due Date:** $due_date
-**Status:** Pending
-
-## Description
-$safe_description
-
-## Notes
-- 
-
-## Resources
-- 
-EOF
-    
-    echo -e "${COLOR_GREEN}Task added successfully!${COLOR_RESET}"
-    echo -e "${COLOR_BLUE}Task folder created at: ${COLOR_CYAN}$task_dir${COLOR_RESET}"
-}
-
-# Mark a task as complete
-complete_task() {
-    if [ -z "$1" ]; then
-        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
-        return 1
-    fi
-    
-    local task_id="$1"
-    local line_number=$((task_id + 1))
-    
-    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
-        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
-        return 1
-    fi
-    
-    # Get task details
-    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
-    IFS=, read -r name due_date description status <<< "$task_line"
-    
-    if [ "$status" = "Completed" ]; then
-        echo -e "${COLOR_YELLOW}Task is already marked as completed.${COLOR_RESET}"
-        return 0
-    fi
-    
-    # Update task status using platform-specific sed commands
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS sed
-        sed -i '' "${line_number}s/,Pending\$/,Completed/" "$TASKS_FILE"
-    else
-        # Linux sed
-        sed -i "${line_number}s/,Pending\$/,Completed/" "$TASKS_FILE"
-    fi
-    
-    # Update README in task folder
-    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-    if [ -f "$task_dir/README.md" ]; then
-        if [ "$PLATFORM" == "macos" ]; then
-            # macOS sed
-            sed -i '' "s/\*\*Status:\*\* Pending/\*\*Status:\*\* Completed/" "$task_dir/README.md"
-        else
-            # Linux sed
-            sed -i "s/\*\*Status:\*\* Pending/\*\*Status:\*\* Completed/" "$task_dir/README.md"
-        fi
-    fi
-    
-    echo -e "${COLOR_GREEN}Task marked as completed!${COLOR_RESET}"
-}
-
-# Delete a task
-delete_task() {
-    if [ -z "$1" ]; then
-        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
-        return 1
-    fi
-    
-    local task_id="$1"
-    local line_number=$((task_id + 1))
-    
-    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
-        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
-        return 1
-    fi
-    
-    # Get task details before deleting
-    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
-    IFS=, read -r name due_date description status <<< "$task_line"
-    
-    # Confirm deletion
-    read -p "Are you sure you want to delete task '$name'? (y/n): " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo -e "${COLOR_YELLOW}Task deletion cancelled.${COLOR_RESET}"
-        return 0
-    fi
-    
-    # Delete task from CSV using platform-specific sed commands
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS sed
-        sed -i '' "${line_number}d" "$TASKS_FILE"
-    else
-        # Linux sed
-        sed -i "${line_number}d" "$TASKS_FILE"
-    fi
-    
-    # Ask about task folder
-    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-    if [ -d "$task_dir" ]; then
-        read -p "Do you want to delete the task folder as well? (y/n): " delete_folder
-        if [[ "$delete_folder" =~ ^[Yy]$ ]]; then
-            rm -rf "$task_dir"
-            echo -e "${COLOR_GREEN}Task folder deleted.${COLOR_RESET}"
-        else
-            echo -e "${COLOR_YELLOW}Task folder kept at: ${COLOR_CYAN}$task_dir${COLOR_RESET}"
-        fi
-    fi
-    
-    echo -e "${COLOR_GREEN}Task deleted successfully!${COLOR_RESET}"
-}
-
-# Edit a task
-edit_task() {
-    if [ -z "$1" ]; then
-        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
-        return 1
-    fi
-    
-    local task_id="$1"
-    local line_number=$((task_id + 1))
-    
-    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
-        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
-        return 1
-    fi
-    
-    # Get task details
-    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
-    IFS=, read -r name due_date description status <<< "$task_line"
-    
-    echo -e "${COLOR_BLUE}Editing task:${COLOR_RESET} ${COLOR_CYAN}$name${COLOR_RESET}"
-    echo -e "${COLOR_YELLOW}(Leave field empty to keep current value)${COLOR_RESET}"
-    
-    # Get new values
-    read -p "Task name [$name]: " new_name
-    new_name=${new_name:-$name}
-    
-    while true; do
-        read -p "Due date [$due_date]: " new_due_date
-        new_due_date=${new_due_date:-$due_date}
-        
-        if [ -z "$new_due_date" ] || validate_date "$new_due_date"; then
-            break
-        else
-            echo -e "${COLOR_RED}Invalid date format. Please use YYYY-MM-DD.${COLOR_RESET}"
-        fi
-    done
-    
-    read -p "Description [$description]: " new_description
-    new_description=${new_description:-$description}
-    
-    read -p "Status (Pending/Completed) [$status]: " new_status
-    new_status=${new_status:-$status}
-    
-    # Validate status
-    if [ "$new_status" != "Pending" ] && [ "$new_status" != "Completed" ]; then
-        echo -e "${COLOR_RED}Invalid status. Using '$status'.${COLOR_RESET}"
-        new_status=$status
-    fi
-    
-    # Escape any commas to avoid CSV issues
-    safe_new_name="${new_name//,/;}"
-    safe_new_description="${new_description//,/;}"
-    
-    # Update task in CSV using platform-specific sed commands
-    if [ "$PLATFORM" == "macos" ]; then
-        # macOS sed
-        sed -i '' "${line_number}s/.*/$safe_new_name,$new_due_date,$safe_new_description,$new_status/" "$TASKS_FILE"
-    else
-        # Linux sed
-        sed -i "${line_number}s/.*/$safe_new_name,$new_due_date,$safe_new_description,$new_status/" "$TASKS_FILE"
-    fi
-    
-    # Handle task folder if name changed
-    if [ "$name" != "$new_name" ]; then
-        old_task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-        new_task_dir="$UNI_DIR/$(echo "$new_name" | tr ' ' '_')"
-        
-        if [ -d "$old_task_dir" ]; then
-            # Move folder if it exists
-            mv "$old_task_dir" "$new_task_dir"
-            echo -e "${COLOR_BLUE}Task folder renamed to: ${COLOR_CYAN}$new_task_dir${COLOR_RESET}"
-        else
-            # Create new folder
-            mkdir -p "$new_task_dir"
-            echo -e "${COLOR_BLUE}New task folder created at: ${COLOR_CYAN}$new_task_dir${COLOR_RESET}"
-        fi
-        
-        # Update README
-        if [ -f "$new_task_dir/README.md" ]; then
-            # Update README content with platform-specific sed commands
-            if [ "$PLATFORM" == "macos" ]; then
-                # macOS sed
-                sed -i '' "s/^# .*$/# $new_name/" "$new_task_dir/README.md"
-                sed -i '' "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$new_task_dir/README.md" 
-                sed -i '' "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$new_task_dir/README.md"
-            else
-                # Linux sed
-                sed -i "s/^# .*$/# $new_name/" "$new_task_dir/README.md"
-                sed -i "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$new_task_dir/README.md"
-                sed -i "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$new_task_dir/README.md"
-            fi
-            
-            # Update description - this is trickier with sed, so we'll use a temp file
-            awk -v desc="$new_description" '
-            BEGIN{replaced=0}
-            /^## Description/{print; print desc; getline; replaced=1; next}
-            {print}
-            ' "$new_task_dir/README.md" > "$new_task_dir/README.md.tmp" 
-            
-            mv "$new_task_dir/README.md.tmp" "$new_task_dir/README.md"
-        else
-            # Create new README
-            cat > "$new_task_dir/README.md" << EOF
-# $new_name
-
-**Due Date:** $new_due_date
-**Status:** $new_status
-
-## Description
-$new_description
-
-## Notes
-- 
-
-## Resources
-- 
-EOF
-        fi
-    else
-        # Just update README in existing folder
-        task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
-        if [ -f "$task_dir/README.md" ]; then
-            if [ "$PLATFORM" == "macos" ]; then
-                # macOS sed
-                sed -i '' "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$task_dir/README.md"
-                sed -i '' "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$task_dir/README.md"
-            else
-                # Linux sed
-                sed -i "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$task_dir/README.md"
-                sed -i "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$task_dir/README.md"
-            fi
-            
-            # Update description
-            awk -v desc="$new_description" '
-            BEGIN{replaced=0}
-            /^## Description/{print; print desc; getline; replaced=1; next}
-            {print}
-            ' "$task_dir/README.md" > "$task_dir/README.md.tmp"
-            
-            mv "$task_dir/README.md.tmp" "$task_dir/README.md"
-        fi
-    fi
-    
-    echo -e "${COLOR_GREEN}Task updated successfully!${COLOR_RESET}"
-}
-
-# View task details
-view_task() {
-    if [ -z "$1" ]; then
-        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
-        return 1
-    fi
-    
-    local task_id="$1"
-    local line_number=$((task_id + 1))
-    
-    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
-        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
-        if [[ "\$PROJECTS_BACKUP" == *.enc ]]; then
-        echo "🔑 Enter decryption password for Projects backup:"
-        read -s password
-        openssl enc -aes-256-cbc -d -in "\$PROJECTS_BACKUP" -out "Projects_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
-        PROJECTS_BACKUP="Projects_${BACKUP_TIMESTAMP}.tar.gz"
-    fi
-    
-    echo "📂 Extracting Projects backup..."
-    mkdir -p "$HOME/Projects"
-    tar -xzf "\$PROJECTS_BACKUP" -C "$HOME"
-    echo "✅ Projects restored to $HOME/Projects"
-fi
-
-# Extract university files
-UNI_BACKUP="\$(ls University_${BACKUP_TIMESTAMP}.tar.gz 2>/dev/null || ls University_${BACKUP_TIMESTAMP}.tar.gz.enc 2>/dev/null)"
-if [ -n "\$UNI_BACKUP" ]; then
-    if [[ "\$UNI_BACKUP" == *.enc ]]; then
-        echo "🔑 Enter decryption password for University backup:"
-        read -s password
-        openssl enc -aes-256-cbc -d -in "\$UNI_BACKUP" -out "University_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
-        UNI_BACKUP="University_${BACKUP_TIMESTAMP}.tar.gz"
-    fi
-    
-    echo "📂 Extracting University backup..."
-    mkdir -p "$HOME/Uni"
-    tar -xzf "\$UNI_BACKUP" -C "$HOME"
-    echo "✅ University files restored to $HOME/Uni"
-fi
-
-# Extract configuration files
-CONFIG_BACKUP="\$(ls configs_${BACKUP_TIMESTAMP}.tar.gz 2>/dev/null || ls configs_${BACKUP_TIMESTAMP}.tar.gz.enc 2>/dev/null)"
-if [ -n "\$CONFIG_BACKUP" ]; then
-    if [[ "\$CONFIG_BACKUP" == *.enc ]]; then
-        echo "🔑 Enter decryption password for configuration files backup:"
-        read -s password
-        openssl enc -aes-256-cbc -d -in "\$CONFIG_BACKUP" -out "configs_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
-        CONFIG_BACKUP="configs_${BACKUP_TIMESTAMP}.tar.gz"
-    fi
-    
-    echo "📂 Extracting configuration files..."
-    mkdir -p "configs_temp"
-    tar -xzf "\$CONFIG_BACKUP" -C "configs_temp"
-    
-    # Backup existing configs before overwriting
-    BACKUP_DIR="\$HOME/.config_backup_$(date +%Y%m%d%H%M%S)"
-    mkdir -p "\$BACKUP_DIR"
-    
-    # Copy each file back to its proper location
-    find "configs_temp/configs" -type f | while read file; do
-        relative_path="\${file#configs_temp/configs/}"
-        target_path="\$HOME/\$relative_path"
-        
-        # Backup existing file if it exists
-        if [ -f "\$target_path" ]; then
-            mkdir -p "\$(dirname "\$BACKUP_DIR/\$relative_path")"
-            cp "\$target_path" "\$BACKUP_DIR/\$relative_path"
-        fi
-        
-        # Create the directory if it doesn't exist
-        mkdir -p "\$(dirname "\$target_path")"
-        
-        # Copy the file
-        cp "\$file" "\$target_path"
-        echo "✅ Restored \$relative_path"
-    done
-    
-    # Clean up
-    rm -rf "configs_temp"
-    echo "✅ Configuration files restored"
-    echo "⚠️ Original configuration files have been backed up to \$BACKUP_DIR"
-fi
-
-echo "✅ Backup restoration completed!"
-EOF
-
-chmod +x "${BACKUP_DIR}/restore_backup.sh"
-log "✅ Created restore script: ${BACKUP_DIR}/restore_backup.sh"
-
-exit 0
-EOL
-
-    chmod +x "$SCRIPTS_DIR/backup/backup_projects.sh"
-    
-    # Create Windows batch file to trigger the script
-    cat > "$SCRIPTS_DIR/backup/backup_projects.bat" << 'EOL'
-@echo off
-:: Run Projects Backup script via WSL
-wsl bash -c "~/scripts/backup/backup_projects.sh"
-EOL
-    
-    # Create configuration file
-    mkdir -p "$SCRIPTS_DIR/config"
-    
-    cat > "$SCRIPTS_DIR/config/backup.conf" << 'EOL'
-# Configuration for System Backup Script
-
-# Backup locations
-BACKUP_BASE_DIR="/mnt/g/My Drive/Backups"
-PROJECTS_DIR="$HOME/Projects"
-UNI_DIR="$HOME/Uni"
-
-# Backup settings
-BACKUP_CONFIG_FILES=true
-BACKUP_ENCRYPTION=false
-ENCRYPTION_PASSWORD=""
-RETENTION_DAYS=30
-EOL
-
-    return 0
-}
-
-create_system_backup() {
-    info "Setting up System Backup..."
-    
-    # Create the scripts if they don't exist
-    if [ ! -f "$SCRIPTS_DIR/backup/backup_projects.sh" ]; then
-        create_backup_scripts
-    fi
-    
-    # Make sure config directory exists
-    mkdir -p "$SCRIPTS_DIR/config"
-    
-    # Create default config if it doesn't exist
-    if [ ! -f "$SCRIPTS_DIR/config/backup.conf" ]; then
-        cat > "$SCRIPTS_DIR/config/backup.conf" << 'EOL'
-# Configuration for System Backup Script
-
-# Backup locations
-BACKUP_BASE_DIR="/mnt/g/My Drive/Backups"
-PROJECTS_DIR="$HOME/Projects"
-UNI_DIR="$HOME/Uni"
-
-# Backup settings
-BACKUP_CONFIG_FILES=true
-BACKUP_ENCRYPTION=false
-ENCRYPTION_PASSWORD=""
-RETENTION_DAYS=30
-EOL
-    fi
-    
-    # Get Google Drive path
-    backup_path=$(get_google_drive_path)
-    
-    if [ -n "$backup_path" ]; then
-        # Use different sed syntax based on platform (macOS vs Linux)
-        if [ "$(uname)" == "Darwin" ]; then
-            sed -i '' "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
-        else
-            sed -i "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
-        fi
-        
-        success "Backup location set to $backup_path"
-        
-        # Create the backup directory structure if it doesn't exist
-        if [ ! -d "$backup_path" ]; then
-            info "Attempting to create backup directory: $backup_path"
-            mkdir -p "$backup_path"
-            
-            if [ $? -ne 0 ]; then
-                warning "Could not create backup directory automatically"
-                warning "You may need to create it manually or check drive mapping"
-                
-                if [ "$PLATFORM" == "wsl" ]; then
-                    info "For WSL, make sure your Google Drive is mounted correctly"
-                    info "Try to create this path from Windows Explorer: G:\\My Drive\\Backups"
-                fi
-            else
-                success "Created backup directory: $backup_path"
-            fi
-        fi
-    else
-        error "No backup path provided. Backup location may not work correctly."
-    fi
-    
-    # Ask if they want to enable encryption
-    read -p "Do you want to enable backup encryption? (y/n): " enable_encryption
-    
-    if [[ "$enable_encryption" =~ ^[Yy]$ ]]; then
-        # Use different sed syntax based on platform (macOS vs Linux)
-        if [ "$(uname)" == "Darwin" ]; then
-            sed -i '' "s/BACKUP_ENCRYPTION=false/BACKUP_ENCRYPTION=true/" "$SCRIPTS_DIR/config/backup.conf"
-        else
-            sed -i "s/BACKUP_ENCRYPTION=false/BACKUP_ENCRYPTION=true/" "$SCRIPTS_DIR/config/backup.conf"
-        fi
-        
-        # Ask for encryption password and store it securely
-        read -s -p "Enter encryption password: " encryption_password
-        echo ""
-        
-        if [ -n "$encryption_password" ]; then
-            # Use different sed syntax based on platform (macOS vs Linux)
-            if [ "$(u            if [ -d "$DOTFILES_DIR/vscode/snippets" ]; then
-                # Backup existing snippets if they exist
-                if [ -d "$VSCODE_DIR/snippets" ]; then
-                    mkdir -p "$BACKUP_DIR/vscode"
-                    cp -r "$VSCODE_DIR/snippets" "$BACKUP_DIR/vscode/"
-                    log "Backed up existing VS Code snippets to $BACKUP_DIR/vscode/"
-                fi
-                
-                mkdir -p "$VSCODE_DIR/snippets"
-                cp -r "$DOTFILES_DIR/vscode/snippets/"* "$VSCODE_DIR/snippets/"
-                log "Restored VS Code snippets"
-            fi
-        else
-            log "Warning: VS Code settings directory not found, skipping VS Code settings restoration"
-        fi
-    fi
-    
-    log "Restore completed successfully"
-    
-    if [ "$(ls -A "$BACKUP_DIR")" ]; then
-        log "Your original files have been backed up to $BACKUP_DIR"
-    else
-        # Remove empty backup directory
-        rmdir "$BACKUP_DIR"
-    fi
-}
-
-# Parse command line arguments
-if [ $# -eq 0 ]; then
-    show_help
-fi
-
-case "$1" in
-    --setup)
-        check_git
-        setup_repo
-        ;;
-    --backup)
-        check_git
-        backup_dotfiles
-        ;;
-    --restore)
-        check_git
-        restore_dotfiles
-        ;;
-    --help)
-        show_help
-        ;;
-    *)
-        echo "Unknown option: $1"
-        show_help
-        ;;
-esac
-
-exit 0
-EOL
-
-    chmod +x "$SCRIPTS_DIR/backup/sync_dotfiles.sh"
-    
-    # Create configuration file
-    mkdir -p "$SCRIPTS_DIR/config"
-    
-    cat > "$SCRIPTS_DIR/config/dotfiles_sync.conf" << 'EOL'
-# Configuration for Dotfiles Sync Script
-
-# Repository settings
-DOTFILES_DIR="$HOME/.dotfiles"
-DOTFILES_REPO=""  # Set this to your GitHub repository URL
-DOTFILES_BRANCH="main"
-
-# Files to sync
-SYNC_FILES=(
-    ".zshrc"
-    ".bashrc"
-    ".bash_aliases"
-    ".gitconfig"
-    ".vimrc"
-    ".tmux.conf"
-    ".prettierrc"
-    ".editorconfig"
-)
-
-# VS Code settings
-SYNC_VSCODE=true
-VSCODE_SETTINGS_DIR="$HOME/.config/Code/User"
-VSCODE_SETTINGS_WIN_DIR="/mnt/c/Users/$USER/AppData/Roaming/Code/User"
-EOL
-
-    return 0
-}
-
-setup_dotfiles_syncer() {
-    info "Setting up Dotfiles Syncer..."
-    
-    # Create the script if it doesn't exist
-    if [ ! -f "$SCRIPTS_DIR/backup/sync_dotfiles.sh" ]; then
-        create_dotfiles_syncer_script
-    fi
-    
-    # Ask for repository URL
-    read -p "Enter your GitHub repository URL for dotfiles (e.g., git@github.com:username/dotfiles.git): " repo_url
-    
-    if [ -n "$repo_url" ]; then
-        # Update the config file
-        if [ "$(uname)" == "Darwin" ]; then
-            sed -i '' "s|DOTFILES_REPO=\"\"|DOTFILES_REPO=\"$repo_url\"|" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
-        else
-            sed -i "s|DOTFILES_REPO=\"\"|DOTFILES_REPO=\"$repo_url\"|" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
-        fi
-        
-        success "Repository URL set to $repo_url"
-    else
-        warning "No repository URL provided. You'll need to set it up later."
-    fi
-    
-    # Ask which files to sync
-    read -p "Do you want to customize which files to sync? (y/n): " customize_files
-    
-    if [[ "$customize_files" =~ ^[Yy]$ ]]; then
-        echo "Enter the files you want to sync (separated by space):"
-        echo "For example: .zshrc .bashrc .gitconfig"
-        read -p "> " custom_files
-        
-        if [ -n "$custom_files" ]; then
-            # Update the config file
-            echo "SYNC_FILES=(" > "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
-            for file in $custom_files; do
-                echo "    \"$file\"" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
-            done
-            echo ")" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
-            
-            # Get the rest of the config file
-            grep -v "^SYNC_FILES=" "$SCRIPTS_DIR/config/dotfiles_sync.conf" | grep -v "^)" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
-            
-            # Replace the config file
-            mv "$SCRIPTS_DIR/config/dotfiles_sync.conf.new" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
-            
-            success "Custom files set for syncing"
-        fi
-    fi
-    
-    # Ask if they want to set up the repository now
-    read -p "Do you want to set up the dotfiles repository now? (y/n): " setup_now
-    
-    if [[ "$setup_now" =~ ^[Yy]$ ]]; then
-        # Check for SSH key
-        if [ ! -f "$HOME/.ssh/id_ed25519" ] && [ ! -f "$HOME/.ssh/id_rsa" ]; then
-            warning "No SSH key found. You might need to create one for GitHub access."
-            read -p "Do you want to create an SSH key now? (y/n): " create_key
-            
-            if [[ "$create_key" =~ ^[Yy]$ ]]; then
-                read -p "Enter your email for the SSH key: " key_email
-                ssh-keygen -t ed25519 -C "$key_email"
-                
-                if [ $? -eq 0 ]; then
-                    success "SSH key created successfully"
-                    echo "You'll need to add this key to your GitHub account:"
-                    cat "$HOME/.ssh/id_ed25519.pub"
-                    echo ""
-                    read -p "Press Enter when you've added the key to GitHub..."
-                else
-                    error "Failed to create SSH key"
-                    read -p "Press Enter to continue anyway..."
-                fi
-            fi
-        fi
-        
-        bash "$SCRIPTS_DIR/backup/sync_dotfiles.sh" --setup
-        if [ $? -ne 0 ]; then
-            error "Repository setup failed"
-        fi
-    else
-        info "You can set up the repository later with: $SCRIPTS_DIR/backup/sync_dotfiles.sh --setup"
-    fi
-    
-    # Set up a periodic backup
-    read -p "Do you want to set up a weekly dotfiles backup? (y/n): " setup_cron
-    
-    if [[ "$setup_cron" =~ ^[Yy]$ ]]; then
-        # Check if crontab is installed
-        if command -v crontab &> /dev/null; then
-            # Add cron job for weekly backup
-            (crontab -l 2>/dev/null || echo "") | grep -v "sync_dotfiles.sh" | { cat; echo "0 0 * * 0 $SCRIPTS_DIR/backup/sync_dotfiles.sh --backup > $SCRIPTS_DIR/logs/dotfiles_sync_cron.log 2>&1"; } | crontab -
-            
-            if [ $? -eq 0 ]; then
-                success "Weekly backup scheduled via crontab"
-            else
-                error "Failed to schedule backup via crontab"
-            fi
-        else
-            warning "crontab not found. You'll need to schedule backups manually."
-        fi
-    fi
-    
-    success "Dotfiles Syncer setup complete"
-    
-    read -p "Press Enter to return to the main menu..."
-    show_menu
-}
-
-# ======= 7. System Backup Script =======
-create_backup_scripts() {
-    info "Creating System Backup scripts..."
-    
-    mkdir -p "$SCRIPTS_DIR/backup"
-    
-    cat > "$SCRIPTS_DIR/backup/backup_projects.sh" << 'EOL'
 #!/bin/bash
 # System Backup Script - Comprehensive backup solution
 
@@ -5000,3 +3435,1569 @@ setup_dev_environment() {
             "davidanson.vscode-markdownlint"
             "mongodb.mongodb-vscode"
             "mtxr.
+
+                return 1
+    fi
+    
+    # Get task details
+    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
+    IFS=, read -r name due_date description status <<< "$task_line"
+    
+    # Calculate days until due
+    local days=$(days_until_due "$due_date")
+    
+    # Display task details
+    echo -e "${COLOR_BLUE}=== Task Details ===${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}Name:${COLOR_RESET}        $name"
+    echo -e "${COLOR_CYAN}Due Date:${COLOR_RESET}    $(format_date "$due_date")"
+    echo -e "${COLOR_CYAN}Description:${COLOR_RESET} $description"
+    echo -e "${COLOR_CYAN}Status:${COLOR_RESET}      $([ "$status" = "Completed" ] && echo -e "${COLOR_GREEN}Completed${COLOR_RESET}" || echo -e "${COLOR_YELLOW}Pending${COLOR_RESET}")"
+    
+    # Check if task folder exists
+    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+    if [ -d "$task_dir" ]; then
+        echo -e "${COLOR_CYAN}Folder:${COLOR_RESET}      $task_dir"
+        
+        # Check for files in the task folder
+        file_count=$(find "$task_dir" -type f | wc -l)
+        if [ $file_count -gt 1 ]; then  # More than just README.md
+            echo -e "${COLOR_CYAN}Files:${COLOR_RESET}       $(($file_count - 1)) files in folder (excluding README)"
+            echo ""
+            echo -e "${COLOR_BLUE}Files in task folder:${COLOR_RESET}"
+            find "$task_dir" -type f -not -name "README.md" | while read -r file; do
+                echo -e "- ${COLOR_CYAN}$(basename "$file")${COLOR_RESET} ($(du -h "$file" | cut -f1))"
+            done
+        else
+            echo -e "${COLOR_CYAN}Files:${COLOR_RESET}       No additional files in folder"
+        fi
+    else
+        echo -e "${COLOR_CYAN}Folder:${COLOR_RESET}      Not created yet"
+    fi
+}
+
+# List pending tasks
+list_pending() {
+    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
+        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
+        return
+    fi
+    
+    echo -e "${COLOR_BLUE}Pending Academic Tasks:${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              ${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}------------------------------------------------${COLOR_RESET}"
+    
+    # Skip header line and process each task
+    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
+        if [ "$status" != "Completed" ]; then
+            # Find the line number using pattern matching
+            line_pattern="$name,$due_date,$description,$status"
+            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
+            
+            if [ -z "$line_number" ]; then
+                continue
+            fi
+            
+            # Adjust line number to be zero-based ID
+            line_number=$((line_number - 1))
+            
+            # Format name (truncate if too long)
+            if [ ${#name} -gt 20 ]; then
+                name="${name:0:17}..."
+            fi
+            
+            # Print task
+            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s\n" "$line_number" "$name" "$(format_date "$due_date")"
+        fi
+    done
+}
+
+# List tasks due today
+list_today() {
+    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
+        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
+        return
+    fi
+    
+    echo -e "${COLOR_BLUE}Tasks Due Today:${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}ID  | Name                    | Status     ${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}----------------------------------------${COLOR_RESET}"
+    
+    local today=$(date +%Y-%m-%d)
+    local found=false
+    
+    # Skip header line and process each task
+    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
+        if [ "$due_date" = "$today" ]; then
+            found=true
+            
+            # Find the line number using pattern matching
+            line_pattern="$name,$due_date,$description,$status"
+            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
+            
+            if [ -z "$line_number" ]; then
+                continue
+            fi
+            
+            # Adjust line number to be zero-based ID
+            line_number=$((line_number - 1))
+            
+            # Format name (truncate if too long)
+            if [ ${#name} -gt 20 ]; then
+                name="${name:0:17}..."
+            fi
+            
+            # Format status
+            if [ "$status" = "Completed" ]; then
+                status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
+            else
+                status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
+            fi
+            
+            # Print task
+            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %s\n" "$line_number" "$name" "$status_text"
+        fi
+    done
+    
+    if [ "$found" = false ]; then
+        echo -e "${COLOR_YELLOW}No tasks due today.${COLOR_RESET}"
+    fi
+}
+
+# List tasks due this week
+list_week() {
+    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
+        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
+        return
+    fi
+    
+    echo -e "${COLOR_BLUE}Tasks Due This Week:${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              | Status     ${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}----------------------------------------------------------${COLOR_RESET}"
+    
+    local found=false
+    
+    # Skip header line and process each task
+    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
+        local days=$(days_until_due "$due_date")
+        
+        if [ $days -ge 0 ] && [ $days -lt 7 ]; then
+            found=true
+            
+            # Find the line number using pattern matching
+            line_pattern="$name,$due_date,$description,$status"
+            line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
+            
+            if [ -z "$line_number" ]; then
+                continue
+            fi
+            
+            # Adjust line number to be zero-based ID
+            line_number=$((line_number - 1))
+            
+            # Format name (truncate if too long)
+            if [ ${#name} -gt 20 ]; then
+                name="${name:0:17}..."
+            fi
+            
+            # Format status
+            if [ "$status" = "Completed" ]; then
+                status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
+            else
+                status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
+            fi
+            
+            # Print task
+            printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s | %s\n" "$line_number" "$name" "$(format_date "$due_date")" "$status_text"
+        fi
+    done
+    
+    if [ "$found" = false ]; then
+        echo -e "${COLOR_YELLOW}No tasks due this week.${COLOR_RESET}"
+    fi
+}
+
+# Main function to process commands
+main() {
+    if [ $# -eq 0 ]; then
+        show_help
+        return
+    fi
+    
+    case "$1" in
+        list)
+            list_tasks
+            ;;
+        add)
+            add_task
+            ;;
+        complete)
+            complete_task "$2"
+            ;;
+        delete)
+            delete_task "$2"
+            ;;
+        edit)
+            edit_task "$2"
+            ;;
+        view)
+            view_task "$2"
+            ;;
+        pending)
+            list_pending
+            ;;
+        today)
+            list_today
+            ;;
+        week)
+            list_week
+            ;;
+        help)
+            show_help
+            ;;
+        *)
+            echo -e "${COLOR_RED}Unknown command: $1${COLOR_RESET}"
+            show_help
+            ;;
+    esac
+}
+
+# Run main function with all arguments
+main "$@"
+EOL
+
+    chmod +x "$SCRIPTS_DIR/academic/task_manager.sh"
+    
+    # Create an alias for easy access
+    if ! grep -q "alias task=" "$HOME/.bash_aliases" 2>/dev/null; then
+        echo 'alias task="$HOME/scripts/academic/task_manager.sh"' >> "$HOME/.bash_aliases"
+    fi
+    
+    return 0
+}
+
+setup_academic_tracker() {
+    info "Setting up Academic Project Tracker..."
+    
+    # Create the script if it doesn't exist
+    if [ ! -f "$SCRIPTS_DIR/academic/task_manager.sh" ]; then
+        create_academic_tracker_script
+    fi
+    
+    # Create an example task to show how it works
+    if [ ! -s "$SCRIPTS_DIR/academic/tasks.csv" ] || [ $(wc -l < "$SCRIPTS_DIR/academic/tasks.csv") -le 1 ]; then
+        echo "Name,Due Date,Description,Status" > "$SCRIPTS_DIR/academic/tasks.csv"
+        
+        # Calculate a due date one week from now using platform-specific date commands
+        if [ "$PLATFORM" == "macos" ]; then
+            # macOS date command
+            due_date=$(date -v+7d +%Y-%m-%d)
+        else
+            # Linux date command
+            due_date=$(date -d "+7 days" +%Y-%m-%d)
+        fi
+        
+        echo "Example Assignment,$due_date,This is an example assignment to demonstrate the task tracker.,Pending" >> "$SCRIPTS_DIR/academic/tasks.csv"
+        
+        # Create example folder
+        mkdir -p "$HOME/Uni/Example_Assignment"
+        
+        # Create README
+        cat > "$HOME/Uni/Example_Assignment/README.md" << EOF
+# Example Assignment
+
+**Due Date:** $due_date
+**Status:** Pending
+
+## Description
+This is an example assignment to demonstrate the task tracker.
+
+## Notes
+- This is just an example
+- You can add your own notes here
+
+## Resources
+- Course website: https://example.edu/course
+- Lecture notes: Week 3
+EOF
+
+        success "Example task created"
+    fi
+    
+    # Demonstrate the tool
+    echo ""
+    echo "===== Academic Project Tracker Demo ====="
+    bash "$SCRIPTS_DIR/academic/task_manager.sh" list
+    echo ""
+    echo "Available commands:"
+    echo "  task list              - List all tasks"
+    echo "  task add               - Add a new task"
+    echo "  task complete <id>     - Mark a task as complete"
+    echo "  task edit <id>         - Edit a task"
+    echo "  task view <id>         - View task details"
+    echo "  task week              - See tasks due this week"
+    echo ""
+    echo "Tasks are stored in: $SCRIPTS_DIR/academic/tasks.csv"
+    echo "Project folders are created in: $HOME/Uni/"
+    echo ""
+    
+    success "Academic Project Tracker setup complete"
+    
+    read -p "Press Enter to return to the main menu..."
+    show_menu
+}
+
+# ======= 9. Configure All Tools =======
+configure_all_tools() {
+    info "Configuring all tools..."
+    
+    # User information
+    read -p "Enter your full name for configuration [$DEFAULT_USERNAME]: " full_name
+    full_name=${full_name:-$DEFAULT_USERNAME}
+    
+    read -p "Enter your email for configuration [$DEFAULT_EMAIL]: " email
+    email=${email:-$DEFAULT_EMAIL}
+    
+    read -p "Enter your GitHub username [$DEFAULT_GITHUB_USERNAME]: " github_username
+    github_username=${github_username:-$DEFAULT_GITHUB_USERNAME}
+    
+    # Get Google Drive path for backups
+    backup_path=$(get_google_drive_path)
+    
+    # Update config files
+    if [ -f "$SCRIPTS_DIR/config/backup.conf" ]; then
+        # Use different sed syntax based on platform
+        if [ "$(uname)" == "Darwin" ]; then
+            # macOS sed
+            sed -i '' "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
+        else
+            # Linux sed
+            sed -i "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
+        fi
+        
+        success "Backup path set to $backup_path"
+    fi
+    
+    # Set up Git config
+    if [ -n "$full_name" ]; then
+        git config --global user.name "$full_name"
+        success "Git username set to: $full_name"
+    fi
+    
+    if [ -n "$email" ]; then
+        git config --global user.email "$email"
+        success "Git email set to: $email"
+    fi
+    
+    # Set up Zsh theme if zsh is installed
+    if [ -f "$HOME/.zshrc" ]; then
+        if grep -q "ZSH_THEME=\"robbyrussell\"" "$HOME/.zshrc"; then
+            if [ "$(uname)" == "Darwin" ]; then
+                # macOS sed
+                sed -i '' 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
+            else
+                # Linux sed
+                sed -i 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
+            fi
+            success "Zsh theme set to Powerlevel10k"
+        fi
+    fi
+    
+    # Configure VS Code settings if present
+    vs_code_dir=""
+    if [ -d "$HOME/.config/Code/User" ]; then
+        vs_code_dir="$HOME/.config/Code/User"
+    elif [ "$PLATFORM" == "wsl" ]; then
+        # Try to detect VS Code settings in Windows
+        WIN_USER=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r')
+        if [ -n "$WIN_USER" ] && [[ ! "$WIN_USER" == *"%" ]]; then
+            POTENTIAL_VSCODE_DIR="/mnt/c/Users/$WIN_USER/AppData/Roaming/Code/User"
+            if [ -d "$POTENTIAL_VSCODE_DIR" ]; then
+                vs_code_dir="$POTENTIAL_VSCODE_DIR"
+            fi
+        fi
+    fi
+    
+    if [ -n "$vs_code_dir" ]; then
+        mkdir -p "$vs_code_dir"
+        
+        # Create settings.json
+        cat > "$vs_code_dir/settings.json" << EOF
+{
+    "editor.fontFamily": "JetBrains Mono, Consolas, 'Courier New', monospace",
+    "editor.fontSize": 14,
+    "editor.lineHeight": 22,
+    "editor.fontWeight": "400",
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": true
+    },
+    "editor.bracketPairColorization.enabled": true,
+    "editor.guides.bracketPairs": true,
+    "editor.minimap.enabled": false,
+    "editor.rulers": [80, 100],
+    "editor.wordWrap": "on",
+    "explorer.confirmDelete": false,
+    "explorer.confirmDragAndDrop": false,
+    "files.associations": {
+        "*.css": "css"
+    },
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.exclude": {
+        "**/.git": true,
+        "**/.DS_Store": true,
+        "**/node_modules": true,
+        "**/__pycache__": true,
+        "**/venv": true,
+        ".pytest_cache": true,
+        ".coverage": true
+    },
+    "terminal.integrated.fontFamily": "JetBrains Mono, Consolas, 'Courier New', monospace",
+    "terminal.integrated.fontSize": 14,
+    "workbench.colorTheme": "One Dark Pro",
+    "workbench.iconTheme": "material-icon-theme",
+    "workbench.editor.enablePreview": false,
+    "workbench.startupEditor": "newUntitledFile",
+    "javascript.updateImportsOnFileMove.enabled": "always",
+    "javascript.format.enable": false,
+    "python.formatting.provider": "black",
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "python.linting.flake8Enabled": true,
+    "jupyter.themeMatplotlibPlots": true,
+    "jupyter.askForKernelRestart": false,
+    "[javascript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+    },
+    "[typescript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+    },
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "ms-python.python"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[html]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[css]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    }
+}
+EOF
+        
+        success "VS Code settings configured"
+    else
+        warning "VS Code settings directory not found. Skipping VS Code configuration."
+    fi
+    
+    success "All tools configured"
+    
+    read -p "Press Enter to return to the main menu..."
+    show_menu
+}
+
+# ======= Main Script Execution =======
+# Display the main menu to start
+show_menu
+            # Use different sed syntax based on platform (macOS vs Linux)
+            if [ "$(uname)" == "Darwin" ]; then
+                sed -i '' "s/ENCRYPTION_PASSWORD=\"\"/ENCRYPTION_PASSWORD=\"$encryption_password\"/" "$SCRIPTS_DIR/config/backup.conf"
+            else
+                sed -i "s/ENCRYPTION_PASSWORD=\"\"/ENCRYPTION_PASSWORD=\"$encryption_password\"/" "$SCRIPTS_DIR/config/backup.conf"
+            fi
+            
+            success "Encryption enabled and password set"
+            
+            # Security warning
+            warning "Note: Your encryption password is stored in plain text in $SCRIPTS_DIR/config/backup.conf"
+            warning "Consider restricting access to this file: chmod 600 $SCRIPTS_DIR/config/backup.conf"
+            
+            # Set appropriate permissions on the config file
+            chmod 600 "$SCRIPTS_DIR/config/backup.conf"
+        else
+            warning "No password provided, encryption may not work correctly"
+        fi
+    fi
+    
+    # Ask how many days to keep backups
+    read -p "How many days do you want to keep backups? (default: 30): " retention_days
+    
+    if [ -n "$retention_days" ] && [[ "$retention_days" =~ ^[0-9]+$ ]]; then
+        # Use different sed syntax based on platform (macOS vs Linux)
+        if [ "$(uname)" == "Darwin" ]; then
+            sed -i '' "s/RETENTION_DAYS=30/RETENTION_DAYS=$retention_days/" "$SCRIPTS_DIR/config/backup.conf"
+        else
+            sed -i "s/RETENTION_DAYS=30/RETENTION_DAYS=$retention_days/" "$SCRIPTS_DIR/config/backup.conf"
+        fi
+        
+        success "Backup retention set to $retention_days days"
+    fi
+    
+    # Ask if they want to run it now
+    read -p "Do you want to run the backup now? (y/n): " run_now
+    
+    if [[ "$run_now" =~ ^[Yy]$ ]]; then
+        # Source the updated config before running
+        source "$SCRIPTS_DIR/config/backup.conf"
+        
+        # Check access to backup location before running
+        if [ ! -d "$BACKUP_BASE_DIR" ]; then
+            warning "Backup location $BACKUP_BASE_DIR doesn't exist or is not accessible"
+            
+            if [ "$PLATFORM" == "wsl" ]; then
+                # For WSL, provide more specific guidance about Google Drive paths
+                info "The Google Drive path is not accessible from WSL."
+                info "Check that G: drive is properly mounted in Windows"
+                info "Make sure 'G:\\My Drive\\Backups' exists in Windows Explorer"
+                
+                read -p "Try to create the backup directory manually? (y/n): " create_dir
+                
+                if [[ "$create_dir" =~ ^[Yy]$ ]]; then
+                    # Try a more robust directory creation approach
+                    mkdir -p "$BACKUP_BASE_DIR" 2>/dev/null
+                    
+                    if [ ! -d "$BACKUP_BASE_DIR" ]; then
+                        # If that fails, try using cmd.exe as fallback
+                        win_path=$(echo "$BACKUP_BASE_DIR" | sed 's|/mnt/\([a-z]\)|\U\1:|' | sed 's|/|\\|g')
+                        cmd.exe /C "mkdir \"$win_path\"" 2>/dev/null
+                        
+                        # Check again
+                        if [ ! -d "$BACKUP_BASE_DIR" ]; then
+                            error "Could not create backup directory."
+                            info "Please create the following directory manually in Windows:"
+                            info "G:\\My Drive\\Backups"
+                            
+                            read -p "Press Enter to continue..."
+                            return 1
+                        fi
+                    fi
+                else
+                    warning "Backup cannot proceed without a valid backup location"
+                    info "Please create the directory manually and try again"
+                    read -p "Press Enter to continue..."
+                    return 1
+                fi
+            else
+                # For non-WSL platforms
+                read -p "Do you want to create it? (y/n): " create_dir
+                
+                if [[ "$create_dir" =~ ^[Yy]$ ]]; then
+                    mkdir -p "$BACKUP_BASE_DIR"
+                    if [ $? -ne 0 ]; then
+                        error "Failed to create backup directory. Please check your configuration."
+                        info "You may need to create the directory manually or specify a different location."
+                        return 1
+                    fi
+                else
+                    warning "Backup cannot proceed without a valid backup location"
+                    info "Please create the directory manually and try again"
+                    read -p "Press Enter to continue..."
+                    return 1
+                fi
+            fi
+        fi
+        
+        # Run the backup with error handling
+        if ! bash "$SCRIPTS_DIR/backup/backup_projects.sh"; then
+            error "Backup failed. Check logs for details: $SCRIPTS_DIR/logs/"
+        else
+            success "Backup completed successfully"
+        fi
+    fi
+    
+    # Ask if they want to schedule it
+    read -p "Do you want to schedule this to run weekly? (y/n): " schedule_it
+    
+    if [[ "$schedule_it" =~ ^[Yy]$ ]]; then
+        # Create scheduled task script with improved robustness
+        cat > "$SCRIPTS_DIR/backup/setup_backup_task.ps1" << 'EOL'
+# Setup Windows Task Scheduler for Weekly Backup
+# Run this with PowerShell as Administrator
+
+$ErrorActionPreference = "Stop"
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+
+# Check if running as Administrator
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "❌ This script needs to be run as Administrator." -ForegroundColor Red
+    Write-Host "Please right-click the PowerShell icon and select 'Run as administrator', then try again." -ForegroundColor Yellow
+    exit 1
+}
+
+try {
+    $taskName = "WeeklySystemBackup"
+    $taskDescription = "Weekly backup of projects and configuration files"
+    $scriptPath = "$env:USERPROFILE\scripts\backup\backup_projects.bat"
+
+    # Check for WSL paths
+    $wslPath = Get-ChildItem "$env:USERPROFILE\AppData\Local\Packages\*Ubuntu*\LocalState\rootfs\home\*\scripts\backup\backup_projects.bat" -ErrorAction SilentlyContinue
+    
+    if ($wslPath) {
+        Write-Host "Found WSL script at: $($wslPath.FullName)" -ForegroundColor Cyan
+        $scriptPath = $wslPath.FullName
+    }
+    
+    # Verify script exists
+    if (-not (Test-Path $scriptPath)) {
+        Write-Host "❌ Script not found at: $scriptPath" -ForegroundColor Red
+        $manualPath = Read-Host "Enter the full path to backup_projects.bat (or press Enter to cancel)"
+        
+        if ([string]::IsNullOrEmpty($manualPath)) {
+            Write-Host "Task setup cancelled." -ForegroundColor Yellow
+            exit 1
+        }
+        
+        if (-not (Test-Path $manualPath)) {
+            Write-Host "❌ Script still not found. Please verify the path and try again." -ForegroundColor Red
+            exit 1
+        }
+        
+        $scriptPath = $manualPath
+    }
+
+    # Create a new task action
+    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$scriptPath`""
+
+    # Create a trigger to run weekly on Sunday at 2 AM
+    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 2am
+
+    # Register the task with higher privileges
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Description $taskDescription -RunLevel Highest -Force
+
+    Write-Host "✅ Weekly backup scheduled task created successfully!" -ForegroundColor Green
+    Write-Host "⏰ The task will run every Sunday at 2:00 AM" -ForegroundColor Cyan
+}
+catch {
+    Write-Host "❌ Error creating scheduled task: $_" -ForegroundColor Red
+    exit 1
+}
+EOL
+
+        success "PowerShell script for task scheduling created"
+        info "To schedule the task, please run the PowerShell script as administrator:"
+        info "PowerShell.exe -ExecutionPolicy Bypass -File \"$SCRIPTS_DIR/backup/setup_backup_task.ps1\""
+    fi
+    
+    success "System Backup setup complete"
+    
+    # Add a reminder about backup in .zshrc if not already present
+    if [ -f "$HOME/.zshrc" ] && ! grep -q "backup_projects.sh" "$HOME/.zshrc"; then
+        cat >> "$HOME/.zshrc" << 'EOL'
+
+# Backup reminder - check if it's been more than 7 days since last backup
+if [ -f ~/last_backup.txt ]; then
+    last_backup=$(cat ~/last_backup.txt)
+    today=$(date +%Y-%m-%d)
+    
+    # Handle different date commands based on OS
+    if [ "$(uname)" == "Darwin" ]; then
+        # macOS
+        last_backup_seconds=$(date -j -f "%Y-%m-%d" "$last_backup" +%s)
+        today_seconds=$(date -j -f "%Y-%m-%d" "$today" +%s)
+    else
+        # Linux
+        last_backup_seconds=$(date -d "$last_backup" +%s)
+        today_seconds=$(date -d "$today" +%s)
+    fi
+    
+    days_diff=$(( (today_seconds - last_backup_seconds) / 86400 ))
+    
+    if [ $days_diff -gt 7 ]; then
+        echo "⚠️  It's been $days_diff days since your last backup. Consider running: backup"
+    fi
+fi
+EOL
+
+        success "Backup reminder added to .zshrc"
+    fi
+    
+    read -p "Press Enter to return to the main menu..."
+    show_menu
+}
+
+# ======= 8. Academic Project Tracker =======
+create_academic_tracker_script() {
+    info "Creating Academic Project Tracker script..."
+    
+    mkdir -p "$SCRIPTS_DIR/academic"
+    
+    cat > "$SCRIPTS_DIR/academic/task_manager.sh" << 'EOL'
+#!/bin/bash
+# Academic Task Manager
+# Helps track assignments, projects, and deadlines
+
+set -e
+
+# Configuration
+SCRIPT_DIR="$HOME/scripts"
+CONFIG_DIR="$SCRIPT_DIR/config"
+TASKS_FILE="$SCRIPT_DIR/academic/tasks.csv"
+UNI_DIR="$HOME/Uni"
+
+# Function to detect platform - WSL, Linux, or macOS
+detect_platform() {
+    if grep -q Microsoft /proc/version 2>/dev/null; then
+        echo "wsl"
+    elif [[ "$(uname)" == "Darwin" ]]; then
+        echo "macos"
+    else
+        echo "linux"
+    fi
+}
+
+PLATFORM=$(detect_platform)
+
+# Create directories if they don't exist
+mkdir -p "$SCRIPT_DIR/academic"
+mkdir -p "$UNI_DIR"
+
+# Create tasks file if it doesn't exist
+if [ ! -f "$TASKS_FILE" ]; then
+    echo "Name,Due Date,Description,Status" > "$TASKS_FILE"
+fi
+
+# Colorized output
+COLOR_RED='\033[0;31m'
+COLOR_GREEN='\033[0;32m'
+COLOR_YELLOW='\033[0;33m'
+COLOR_BLUE='\033[0;34m'
+COLOR_PURPLE='\033[0;35m'
+COLOR_CYAN='\033[0;36m'
+COLOR_RESET='\033[0m'
+
+# Help function
+show_help() {
+    echo -e "${COLOR_BLUE}Academic Task Manager${COLOR_RESET}"
+    echo -e "${COLOR_GREEN}Usage:${COLOR_RESET} $(basename $0) [command] [options]"
+    echo ""
+    echo -e "${COLOR_YELLOW}Commands:${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}list${COLOR_RESET}                   List all tasks"
+    echo -e "  ${COLOR_CYAN}add${COLOR_RESET}                    Add a new task"
+    echo -e "  ${COLOR_CYAN}complete ${COLOR_RED}<id>${COLOR_RESET}           Mark a task as complete"
+    echo -e "  ${COLOR_CYAN}delete ${COLOR_RED}<id>${COLOR_RESET}             Delete a task"
+    echo -e "  ${COLOR_CYAN}edit ${COLOR_RED}<id>${COLOR_RESET}               Edit a task"
+    echo -e "  ${COLOR_CYAN}view ${COLOR_RED}<id>${COLOR_RESET}               View task details"
+    echo -e "  ${COLOR_CYAN}pending${COLOR_RESET}                List pending tasks"
+    echo -e "  ${COLOR_CYAN}today${COLOR_RESET}                  List tasks due today"
+    echo -e "  ${COLOR_CYAN}week${COLOR_RESET}                   List tasks due this week"
+    echo -e "  ${COLOR_CYAN}help${COLOR_RESET}                   Show this help message"
+    echo ""
+    echo -e "${COLOR_YELLOW}Examples:${COLOR_RESET}"
+    echo -e "  $(basename $0) add"
+    echo -e "  $(basename $0) list"
+    echo -e "  $(basename $0) complete 2"
+    echo ""
+}
+
+# Function to validate date format
+validate_date() {
+    local date_str="$1"
+    
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS date validation
+        date -j -f "%Y-%m-%d" "$date_str" >/dev/null 2>&1
+    else
+        # Linux date validation
+        date -d "$date_str" >/dev/null 2>&1
+    fi
+    
+    return $?
+}
+
+# Function to calculate days until due
+days_until_due() {
+    local due_date="$1"
+    local today=$(date +%s)
+    local due
+    
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS
+        due=$(date -j -f "%Y-%m-%d" "$due_date" +%s)
+    else
+        # Linux
+        due=$(date -d "$due_date" +%s)
+    fi
+    
+    echo $(( (due - today) / 86400 ))
+}
+
+# Format date output
+format_date() {
+    local date_str="$1"
+    local days=$(days_until_due "$date_str")
+    local formatted_date
+    
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS
+        formatted_date=$(date -j -f "%Y-%m-%d" "$date_str" "+%Y-%m-%d")
+    else
+        # Linux
+        formatted_date=$(date -d "$date_str" "+%Y-%m-%d")
+    fi
+    
+    if [ $days -lt 0 ]; then
+        echo -e "${COLOR_RED}$formatted_date (${days#-} days overdue)${COLOR_RESET}"
+    elif [ $days -eq 0 ]; then
+        echo -e "${COLOR_RED}$formatted_date (Due today)${COLOR_RESET}"
+    elif [ $days -eq 1 ]; then
+        echo -e "${COLOR_YELLOW}$formatted_date (Due tomorrow)${COLOR_RESET}"
+    elif [ $days -le 7 ]; then
+        echo -e "${COLOR_YELLOW}$formatted_date (Due in $days days)${COLOR_RESET}"
+    else
+        echo -e "${COLOR_GREEN}$formatted_date (Due in $days days)${COLOR_RESET}"
+    fi
+}
+
+# List tasks
+list_tasks() {
+    if [ ! -s "$TASKS_FILE" ] || [ $(wc -l < "$TASKS_FILE") -le 1 ]; then
+        echo -e "${COLOR_YELLOW}No tasks found.${COLOR_RESET}"
+        return
+    fi
+    
+    echo -e "${COLOR_BLUE}Academic Tasks:${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}ID  | Name                    | Due Date              | Status     ${COLOR_RESET}"
+    echo -e "${COLOR_CYAN}----------------------------------------------------------${COLOR_RESET}"
+    
+    # Skip header line and process each task
+    tail -n +2 "$TASKS_FILE" | while IFS=, read -r name due_date description status || [ -n "$name" ]; do
+        # Find the line number by pattern matching the entire line
+        # We use pattern matching instead of line counter to handle potential issues with different IFS settings
+        line_pattern="$name,$due_date,$description,$status"
+        line_number=$(grep -n "^$line_pattern$" "$TASKS_FILE" | cut -d: -f1)
+        
+        if [ -z "$line_number" ]; then
+            continue
+        fi
+        
+        # Adjust line number to be zero-based ID
+        line_number=$((line_number - 1))
+        
+        # Format name (truncate if too long)
+        if [ ${#name} -gt 20 ]; then
+            name="${name:0:17}..."
+        fi
+        
+        # Format status
+        if [ "$status" = "Completed" ]; then
+            status_text="${COLOR_GREEN}Completed${COLOR_RESET}"
+        else
+            status_text="${COLOR_YELLOW}Pending${COLOR_RESET}  "
+        fi
+        
+        # Print task
+        printf "${COLOR_CYAN}%-3s${COLOR_RESET} | %-23s | %-20s | %s\n" "$line_number" "$name" "$(format_date "$due_date")" "$status_text"
+    done
+}
+
+# Add a new task
+add_task() {
+    echo -e "${COLOR_BLUE}Add a new academic task:${COLOR_RESET}"
+    
+    # Get task details
+    read -p "Task name: " name
+    
+    while true; do
+        read -p "Due date (YYYY-MM-DD): " due_date
+        if validate_date "$due_date"; then
+            break
+        else
+            echo -e "${COLOR_RED}Invalid date format. Please use YYYY-MM-DD.${COLOR_RESET}"
+        fi
+    done
+    
+    read -p "Description: " description
+    
+    # Add task to CSV, escaping any commas in the name or description
+    # Replace any existing commas with semicolons to avoid CSV field issues
+    safe_name="${name//,/;}"
+    safe_description="${description//,/;}"
+    
+    echo "$safe_name,$due_date,$safe_description,Pending" >> "$TASKS_FILE"
+    
+    # Create folder for the task
+    task_dir="$UNI_DIR/$(echo "$safe_name" | tr ' ' '_')"
+    mkdir -p "$task_dir"
+    
+    # Create README for the task
+    cat > "$task_dir/README.md" << EOF
+# $safe_name
+
+**Due Date:** $due_date
+**Status:** Pending
+
+## Description
+$safe_description
+
+## Notes
+- 
+
+## Resources
+- 
+EOF
+    
+    echo -e "${COLOR_GREEN}Task added successfully!${COLOR_RESET}"
+    echo -e "${COLOR_BLUE}Task folder created at: ${COLOR_CYAN}$task_dir${COLOR_RESET}"
+}
+
+# Mark a task as complete
+complete_task() {
+    if [ -z "$1" ]; then
+        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
+        return 1
+    fi
+    
+    local task_id="$1"
+    local line_number=$((task_id + 1))
+    
+    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
+        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
+        return 1
+    fi
+    
+    # Get task details
+    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
+    IFS=, read -r name due_date description status <<< "$task_line"
+    
+    if [ "$status" = "Completed" ]; then
+        echo -e "${COLOR_YELLOW}Task is already marked as completed.${COLOR_RESET}"
+        return 0
+    fi
+    
+    # Update task status using platform-specific sed commands
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS sed
+        sed -i '' "${line_number}s/,Pending\$/,Completed/" "$TASKS_FILE"
+    else
+        # Linux sed
+        sed -i "${line_number}s/,Pending\$/,Completed/" "$TASKS_FILE"
+    fi
+    
+    # Update README in task folder
+    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+    if [ -f "$task_dir/README.md" ]; then
+        if [ "$PLATFORM" == "macos" ]; then
+            # macOS sed
+            sed -i '' "s/\*\*Status:\*\* Pending/\*\*Status:\*\* Completed/" "$task_dir/README.md"
+        else
+            # Linux sed
+            sed -i "s/\*\*Status:\*\* Pending/\*\*Status:\*\* Completed/" "$task_dir/README.md"
+        fi
+    fi
+    
+    echo -e "${COLOR_GREEN}Task marked as completed!${COLOR_RESET}"
+}
+
+# Delete a task
+delete_task() {
+    if [ -z "$1" ]; then
+        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
+        return 1
+    fi
+    
+    local task_id="$1"
+    local line_number=$((task_id + 1))
+    
+    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
+        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
+        return 1
+    fi
+    
+    # Get task details before deleting
+    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
+    IFS=, read -r name due_date description status <<< "$task_line"
+    
+    # Confirm deletion
+    read -p "Are you sure you want to delete task '$name'? (y/n): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${COLOR_YELLOW}Task deletion cancelled.${COLOR_RESET}"
+        return 0
+    fi
+    
+    # Delete task from CSV using platform-specific sed commands
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS sed
+        sed -i '' "${line_number}d" "$TASKS_FILE"
+    else
+        # Linux sed
+        sed -i "${line_number}d" "$TASKS_FILE"
+    fi
+    
+    # Ask about task folder
+    task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+    if [ -d "$task_dir" ]; then
+        read -p "Do you want to delete the task folder as well? (y/n): " delete_folder
+        if [[ "$delete_folder" =~ ^[Yy]$ ]]; then
+            rm -rf "$task_dir"
+            echo -e "${COLOR_GREEN}Task folder deleted.${COLOR_RESET}"
+        else
+            echo -e "${COLOR_YELLOW}Task folder kept at: ${COLOR_CYAN}$task_dir${COLOR_RESET}"
+        fi
+    fi
+    
+    echo -e "${COLOR_GREEN}Task deleted successfully!${COLOR_RESET}"
+}
+
+# Edit a task
+edit_task() {
+    if [ -z "$1" ]; then
+        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
+        return 1
+    fi
+    
+    local task_id="$1"
+    local line_number=$((task_id + 1))
+    
+    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
+        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
+        return 1
+    fi
+    
+    # Get task details
+    local task_line=$(sed -n "${line_number}p" "$TASKS_FILE")
+    IFS=, read -r name due_date description status <<< "$task_line"
+    
+    echo -e "${COLOR_BLUE}Editing task:${COLOR_RESET} ${COLOR_CYAN}$name${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}(Leave field empty to keep current value)${COLOR_RESET}"
+    
+    # Get new values
+    read -p "Task name [$name]: " new_name
+    new_name=${new_name:-$name}
+    
+    while true; do
+        read -p "Due date [$due_date]: " new_due_date
+        new_due_date=${new_due_date:-$due_date}
+        
+        if [ -z "$new_due_date" ] || validate_date "$new_due_date"; then
+            break
+        else
+            echo -e "${COLOR_RED}Invalid date format. Please use YYYY-MM-DD.${COLOR_RESET}"
+        fi
+    done
+    
+    read -p "Description [$description]: " new_description
+    new_description=${new_description:-$description}
+    
+    read -p "Status (Pending/Completed) [$status]: " new_status
+    new_status=${new_status:-$status}
+    
+    # Validate status
+    if [ "$new_status" != "Pending" ] && [ "$new_status" != "Completed" ]; then
+        echo -e "${COLOR_RED}Invalid status. Using '$status'.${COLOR_RESET}"
+        new_status=$status
+    fi
+    
+    # Escape any commas to avoid CSV issues
+    safe_new_name="${new_name//,/;}"
+    safe_new_description="${new_description//,/;}"
+    
+    # Update task in CSV using platform-specific sed commands
+    if [ "$PLATFORM" == "macos" ]; then
+        # macOS sed
+        sed -i '' "${line_number}s/.*/$safe_new_name,$new_due_date,$safe_new_description,$new_status/" "$TASKS_FILE"
+    else
+        # Linux sed
+        sed -i "${line_number}s/.*/$safe_new_name,$new_due_date,$safe_new_description,$new_status/" "$TASKS_FILE"
+    fi
+    
+    # Handle task folder if name changed
+    if [ "$name" != "$new_name" ]; then
+        old_task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+        new_task_dir="$UNI_DIR/$(echo "$new_name" | tr ' ' '_')"
+        
+        if [ -d "$old_task_dir" ]; then
+            # Move folder if it exists
+            mv "$old_task_dir" "$new_task_dir"
+            echo -e "${COLOR_BLUE}Task folder renamed to: ${COLOR_CYAN}$new_task_dir${COLOR_RESET}"
+        else
+            # Create new folder
+            mkdir -p "$new_task_dir"
+            echo -e "${COLOR_BLUE}New task folder created at: ${COLOR_CYAN}$new_task_dir${COLOR_RESET}"
+        fi
+        
+        # Update README
+        if [ -f "$new_task_dir/README.md" ]; then
+            # Update README content with platform-specific sed commands
+            if [ "$PLATFORM" == "macos" ]; then
+                # macOS sed
+                sed -i '' "s/^# .*$/# $new_name/" "$new_task_dir/README.md"
+                sed -i '' "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$new_task_dir/README.md" 
+                sed -i '' "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$new_task_dir/README.md"
+            else
+                # Linux sed
+                sed -i "s/^# .*$/# $new_name/" "$new_task_dir/README.md"
+                sed -i "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$new_task_dir/README.md"
+                sed -i "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$new_task_dir/README.md"
+            fi
+            
+            # Update description - this is trickier with sed, so we'll use a temp file
+            awk -v desc="$new_description" '
+            BEGIN{replaced=0}
+            /^## Description/{print; print desc; getline; replaced=1; next}
+            {print}
+            ' "$new_task_dir/README.md" > "$new_task_dir/README.md.tmp" 
+            
+            mv "$new_task_dir/README.md.tmp" "$new_task_dir/README.md"
+        else
+            # Create new README
+            cat > "$new_task_dir/README.md" << EOF
+# $new_name
+
+**Due Date:** $new_due_date
+**Status:** $new_status
+
+## Description
+$new_description
+
+## Notes
+- 
+
+## Resources
+- 
+EOF
+        fi
+    else
+        # Just update README in existing folder
+        task_dir="$UNI_DIR/$(echo "$name" | tr ' ' '_')"
+        if [ -f "$task_dir/README.md" ]; then
+            if [ "$PLATFORM" == "macos" ]; then
+                # macOS sed
+                sed -i '' "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$task_dir/README.md"
+                sed -i '' "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$task_dir/README.md"
+            else
+                # Linux sed
+                sed -i "s/\*\*Due Date:\*\* .*$/\*\*Due Date:\*\* $new_due_date/" "$task_dir/README.md"
+                sed -i "s/\*\*Status:\*\* .*$/\*\*Status:\*\* $new_status/" "$task_dir/README.md"
+            fi
+            
+            # Update description
+            awk -v desc="$new_description" '
+            BEGIN{replaced=0}
+            /^## Description/{print; print desc; getline; replaced=1; next}
+            {print}
+            ' "$task_dir/README.md" > "$task_dir/README.md.tmp"
+            
+            mv "$task_dir/README.md.tmp" "$task_dir/README.md"
+        fi
+    fi
+    
+    echo -e "${COLOR_GREEN}Task updated successfully!${COLOR_RESET}"
+}
+
+# View task details
+view_task() {
+    if [ -z "$1" ]; then
+        echo -e "${COLOR_RED}Error: Task ID is required.${COLOR_RESET}"
+        return 1
+    fi
+    
+    local task_id="$1"
+    local line_number=$((task_id + 1))
+    
+    if [ $line_number -le 1 ] || [ $line_number -gt $(wc -l < "$TASKS_FILE") ]; then
+        echo -e "${COLOR_RED}Error: Invalid task ID.${COLOR_RESET}"
+        if [[ "\$PROJECTS_BACKUP" == *.enc ]]; then
+        echo "🔑 Enter decryption password for Projects backup:"
+        read -s password
+        openssl enc -aes-256-cbc -d -in "\$PROJECTS_BACKUP" -out "Projects_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
+        PROJECTS_BACKUP="Projects_${BACKUP_TIMESTAMP}.tar.gz"
+    fi
+    
+    echo "📂 Extracting Projects backup..."
+    mkdir -p "$HOME/Projects"
+    tar -xzf "\$PROJECTS_BACKUP" -C "$HOME"
+    echo "✅ Projects restored to $HOME/Projects"
+fi
+
+# Extract university files
+UNI_BACKUP="\$(ls University_${BACKUP_TIMESTAMP}.tar.gz 2>/dev/null || ls University_${BACKUP_TIMESTAMP}.tar.gz.enc 2>/dev/null)"
+if [ -n "\$UNI_BACKUP" ]; then
+    if [[ "\$UNI_BACKUP" == *.enc ]]; then
+        echo "🔑 Enter decryption password for University backup:"
+        read -s password
+        openssl enc -aes-256-cbc -d -in "\$UNI_BACKUP" -out "University_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
+        UNI_BACKUP="University_${BACKUP_TIMESTAMP}.tar.gz"
+    fi
+    
+    echo "📂 Extracting University backup..."
+    mkdir -p "$HOME/Uni"
+    tar -xzf "\$UNI_BACKUP" -C "$HOME"
+    echo "✅ University files restored to $HOME/Uni"
+fi
+
+# Extract configuration files
+CONFIG_BACKUP="\$(ls configs_${BACKUP_TIMESTAMP}.tar.gz 2>/dev/null || ls configs_${BACKUP_TIMESTAMP}.tar.gz.enc 2>/dev/null)"
+if [ -n "\$CONFIG_BACKUP" ]; then
+    if [[ "\$CONFIG_BACKUP" == *.enc ]]; then
+        echo "🔑 Enter decryption password for configuration files backup:"
+        read -s password
+        openssl enc -aes-256-cbc -d -in "\$CONFIG_BACKUP" -out "configs_${BACKUP_TIMESTAMP}.tar.gz" -k "\$password"
+        CONFIG_BACKUP="configs_${BACKUP_TIMESTAMP}.tar.gz"
+    fi
+    
+    echo "📂 Extracting configuration files..."
+    mkdir -p "configs_temp"
+    tar -xzf "\$CONFIG_BACKUP" -C "configs_temp"
+    
+    # Backup existing configs before overwriting
+    BACKUP_DIR="\$HOME/.config_backup_$(date +%Y%m%d%H%M%S)"
+    mkdir -p "\$BACKUP_DIR"
+    
+    # Copy each file back to its proper location
+    find "configs_temp/configs" -type f | while read file; do
+        relative_path="\${file#configs_temp/configs/}"
+        target_path="\$HOME/\$relative_path"
+        
+        # Backup existing file if it exists
+        if [ -f "\$target_path" ]; then
+            mkdir -p "\$(dirname "\$BACKUP_DIR/\$relative_path")"
+            cp "\$target_path" "\$BACKUP_DIR/\$relative_path"
+        fi
+        
+        # Create the directory if it doesn't exist
+        mkdir -p "\$(dirname "\$target_path")"
+        
+        # Copy the file
+        cp "\$file" "\$target_path"
+        echo "✅ Restored \$relative_path"
+    done
+    
+    # Clean up
+    rm -rf "configs_temp"
+    echo "✅ Configuration files restored"
+    echo "⚠️ Original configuration files have been backed up to \$BACKUP_DIR"
+fi
+
+echo "✅ Backup restoration completed!"
+EOF
+
+chmod +x "${BACKUP_DIR}/restore_backup.sh"
+log "✅ Created restore script: ${BACKUP_DIR}/restore_backup.sh"
+
+exit 0
+EOL
+
+    chmod +x "$SCRIPTS_DIR/backup/backup_projects.sh"
+    
+    # Create Windows batch file to trigger the script
+    cat > "$SCRIPTS_DIR/backup/backup_projects.bat" << 'EOL'
+@echo off
+:: Run Projects Backup script via WSL
+wsl bash -c "~/scripts/backup/backup_projects.sh"
+EOL
+    
+    # Create configuration file
+    mkdir -p "$SCRIPTS_DIR/config"
+    
+    cat > "$SCRIPTS_DIR/config/backup.conf" << 'EOL'
+# Configuration for System Backup Script
+
+# Backup locations
+BACKUP_BASE_DIR="/mnt/g/My Drive/Backups"
+PROJECTS_DIR="$HOME/Projects"
+UNI_DIR="$HOME/Uni"
+
+# Backup settings
+BACKUP_CONFIG_FILES=true
+BACKUP_ENCRYPTION=false
+ENCRYPTION_PASSWORD=""
+RETENTION_DAYS=30
+EOL
+
+    return 0
+}
+
+create_system_backup() {
+    info "Setting up System Backup..."
+    
+    # Create the scripts if they don't exist
+    if [ ! -f "$SCRIPTS_DIR/backup/backup_projects.sh" ]; then
+        create_backup_scripts
+    fi
+    
+    # Make sure config directory exists
+    mkdir -p "$SCRIPTS_DIR/config"
+    
+    # Create default config if it doesn't exist
+    if [ ! -f "$SCRIPTS_DIR/config/backup.conf" ]; then
+        cat > "$SCRIPTS_DIR/config/backup.conf" << 'EOL'
+# Configuration for System Backup Script
+
+# Backup locations
+BACKUP_BASE_DIR="/mnt/g/My Drive/Backups"
+PROJECTS_DIR="$HOME/Projects"
+UNI_DIR="$HOME/Uni"
+
+# Backup settings
+BACKUP_CONFIG_FILES=true
+BACKUP_ENCRYPTION=false
+ENCRYPTION_PASSWORD=""
+RETENTION_DAYS=30
+EOL
+    fi
+    
+    # Get Google Drive path
+    backup_path=$(get_google_drive_path)
+    
+    if [ -n "$backup_path" ]; then
+        # Use different sed syntax based on platform (macOS vs Linux)
+        if [ "$(uname)" == "Darwin" ]; then
+            sed -i '' "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
+        else
+            sed -i "s|BACKUP_BASE_DIR=.*|BACKUP_BASE_DIR=\"$backup_path\"|" "$SCRIPTS_DIR/config/backup.conf"
+        fi
+        
+        success "Backup location set to $backup_path"
+        
+        # Create the backup directory structure if it doesn't exist
+        if [ ! -d "$backup_path" ]; then
+            info "Attempting to create backup directory: $backup_path"
+            mkdir -p "$backup_path"
+            
+            if [ $? -ne 0 ]; then
+                warning "Could not create backup directory automatically"
+                warning "You may need to create it manually or check drive mapping"
+                
+                if [ "$PLATFORM" == "wsl" ]; then
+                    info "For WSL, make sure your Google Drive is mounted correctly"
+                    info "Try to create this path from Windows Explorer: G:\\My Drive\\Backups"
+                fi
+            else
+                success "Created backup directory: $backup_path"
+            fi
+        fi
+    else
+        error "No backup path provided. Backup location may not work correctly."
+    fi
+    
+    # Ask if they want to enable encryption
+    read -p "Do you want to enable backup encryption? (y/n): " enable_encryption
+    
+    if [[ "$enable_encryption" =~ ^[Yy]$ ]]; then
+        # Use different sed syntax based on platform (macOS vs Linux)
+        if [ "$(uname)" == "Darwin" ]; then
+            sed -i '' "s/BACKUP_ENCRYPTION=false/BACKUP_ENCRYPTION=true/" "$SCRIPTS_DIR/config/backup.conf"
+        else
+            sed -i "s/BACKUP_ENCRYPTION=false/BACKUP_ENCRYPTION=true/" "$SCRIPTS_DIR/config/backup.conf"
+        fi
+        
+        # Ask for encryption password and store it securely
+        read -s -p "Enter encryption password: " encryption_password
+        echo ""
+        
+        if [ -n "$encryption_password" ]; then
+            # Use different sed syntax based on platform (macOS vs Linux)
+            if [ "$(u            if [ -d "$DOTFILES_DIR/vscode/snippets" ]; then
+                # Backup existing snippets if they exist
+                if [ -d "$VSCODE_DIR/snippets" ]; then
+                    mkdir -p "$BACKUP_DIR/vscode"
+                    cp -r "$VSCODE_DIR/snippets" "$BACKUP_DIR/vscode/"
+                    log "Backed up existing VS Code snippets to $BACKUP_DIR/vscode/"
+                fi
+                
+                mkdir -p "$VSCODE_DIR/snippets"
+                cp -r "$DOTFILES_DIR/vscode/snippets/"* "$VSCODE_DIR/snippets/"
+                log "Restored VS Code snippets"
+            fi
+        else
+            log "Warning: VS Code settings directory not found, skipping VS Code settings restoration"
+        fi
+    fi
+    
+    log "Restore completed successfully"
+    
+    if [ "$(ls -A "$BACKUP_DIR")" ]; then
+        log "Your original files have been backed up to $BACKUP_DIR"
+    else
+        # Remove empty backup directory
+        rmdir "$BACKUP_DIR"
+    fi
+}
+
+# Parse command line arguments
+if [ $# -eq 0 ]; then
+    show_help
+fi
+
+case "$1" in
+    --setup)
+        check_git
+        setup_repo
+        ;;
+    --backup)
+        check_git
+        backup_dotfiles
+        ;;
+    --restore)
+        check_git
+        restore_dotfiles
+        ;;
+    --help)
+        show_help
+        ;;
+    *)
+        echo "Unknown option: $1"
+        show_help
+        ;;
+esac
+
+exit 0
+EOL
+
+    chmod +x "$SCRIPTS_DIR/backup/sync_dotfiles.sh"
+    
+    # Create configuration file
+    mkdir -p "$SCRIPTS_DIR/config"
+    
+    cat > "$SCRIPTS_DIR/config/dotfiles_sync.conf" << 'EOL'
+# Configuration for Dotfiles Sync Script
+
+# Repository settings
+DOTFILES_DIR="$HOME/.dotfiles"
+DOTFILES_REPO=""  # Set this to your GitHub repository URL
+DOTFILES_BRANCH="main"
+
+# Files to sync
+SYNC_FILES=(
+    ".zshrc"
+    ".bashrc"
+    ".bash_aliases"
+    ".gitconfig"
+    ".vimrc"
+    ".tmux.conf"
+    ".prettierrc"
+    ".editorconfig"
+)
+
+# VS Code settings
+SYNC_VSCODE=true
+VSCODE_SETTINGS_DIR="$HOME/.config/Code/User"
+VSCODE_SETTINGS_WIN_DIR="/mnt/c/Users/$USER/AppData/Roaming/Code/User"
+EOL
+
+    return 0
+}
+
+setup_dotfiles_syncer() {
+    info "Setting up Dotfiles Syncer..."
+    
+    # Create the script if it doesn't exist
+    if [ ! -f "$SCRIPTS_DIR/backup/sync_dotfiles.sh" ]; then
+        create_dotfiles_syncer_script
+    fi
+    
+    # Ask for repository URL
+    read -p "Enter your GitHub repository URL for dotfiles (e.g., git@github.com:username/dotfiles.git): " repo_url
+    
+    if [ -n "$repo_url" ]; then
+        # Update the config file
+        if [ "$(uname)" == "Darwin" ]; then
+            sed -i '' "s|DOTFILES_REPO=\"\"|DOTFILES_REPO=\"$repo_url\"|" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
+        else
+            sed -i "s|DOTFILES_REPO=\"\"|DOTFILES_REPO=\"$repo_url\"|" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
+        fi
+        
+        success "Repository URL set to $repo_url"
+    else
+        warning "No repository URL provided. You'll need to set it up later."
+    fi
+    
+    # Ask which files to sync
+    read -p "Do you want to customize which files to sync? (y/n): " customize_files
+    
+    if [[ "$customize_files" =~ ^[Yy]$ ]]; then
+        echo "Enter the files you want to sync (separated by space):"
+        echo "For example: .zshrc .bashrc .gitconfig"
+        read -p "> " custom_files
+        
+        if [ -n "$custom_files" ]; then
+            # Update the config file
+            echo "SYNC_FILES=(" > "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
+            for file in $custom_files; do
+                echo "    \"$file\"" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
+            done
+            echo ")" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
+            
+            # Get the rest of the config file
+            grep -v "^SYNC_FILES=" "$SCRIPTS_DIR/config/dotfiles_sync.conf" | grep -v "^)" >> "$SCRIPTS_DIR/config/dotfiles_sync.conf.new"
+            
+            # Replace the config file
+            mv "$SCRIPTS_DIR/config/dotfiles_sync.conf.new" "$SCRIPTS_DIR/config/dotfiles_sync.conf"
+            
+            success "Custom files set for syncing"
+        fi
+    fi
+    
+    # Ask if they want to set up the repository now
+    read -p "Do you want to set up the dotfiles repository now? (y/n): " setup_now
+    
+    if [[ "$setup_now" =~ ^[Yy]$ ]]; then
+        # Check for SSH key
+        if [ ! -f "$HOME/.ssh/id_ed25519" ] && [ ! -f "$HOME/.ssh/id_rsa" ]; then
+            warning "No SSH key found. You might need to create one for GitHub access."
+            read -p "Do you want to create an SSH key now? (y/n): " create_key
+            
+            if [[ "$create_key" =~ ^[Yy]$ ]]; then
+                read -p "Enter your email for the SSH key: " key_email
+                ssh-keygen -t ed25519 -C "$key_email"
+                
+                if [ $? -eq 0 ]; then
+                    success "SSH key created successfully"
+                    echo "You'll need to add this key to your GitHub account:"
+                    cat "$HOME/.ssh/id_ed25519.pub"
+                    echo ""
+                    read -p "Press Enter when you've added the key to GitHub..."
+                else
+                    error "Failed to create SSH key"
+                    read -p "Press Enter to continue anyway..."
+                fi
+            fi
+        fi
+        
+        bash "$SCRIPTS_DIR/backup/sync_dotfiles.sh" --setup
+        if [ $? -ne 0 ]; then
+            error "Repository setup failed"
+        fi
+    else
+        info "You can set up the repository later with: $SCRIPTS_DIR/backup/sync_dotfiles.sh --setup"
+    fi
+    
+    # Set up a periodic backup
+    read -p "Do you want to set up a weekly dotfiles backup? (y/n): " setup_cron
+    
+    if [[ "$setup_cron" =~ ^[Yy]$ ]]; then
+        # Check if crontab is installed
+        if command -v crontab &> /dev/null; then
+            # Add cron job for weekly backup
+            (crontab -l 2>/dev/null || echo "") | grep -v "sync_dotfiles.sh" | { cat; echo "0 0 * * 0 $SCRIPTS_DIR/backup/sync_dotfiles.sh --backup > $SCRIPTS_DIR/logs/dotfiles_sync_cron.log 2>&1"; } | crontab -
+            
+            if [ $? -eq 0 ]; then
+                success "Weekly backup scheduled via crontab"
+            else
+                error "Failed to schedule backup via crontab"
+            fi
+        else
+            warning "crontab not found. You'll need to schedule backups manually."
+        fi
+    fi
+    
+    success "Dotfiles Syncer setup complete"
+    
+    read -p "Press Enter to return to the main menu..."
+    show_menu
+}
+
+# ======= 7. System Backup Script =======
+create_backup_scripts() {
+    info "Creating System Backup scripts..."
+    
+    mkdir -p "$SCRIPTS_DIR/backup"
+    
+    cat > "$SCRIPTS_DIR/backup/backup_projects.sh" << 'EOL'
